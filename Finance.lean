@@ -1,2 +1,3 @@
 -- Main library entry point
-import Finance.Basic
+import Finance.Core
+import Finance.Options
