@@ -61,39 +61,37 @@ def analyzeSmile (surface : VolatilitySurface) (expirationIndex : Nat) :
     Option SmileAnalysis :=
   if expirationIndex ≥ surface.expirations.length then
     none
-  else if surface.impliedVols.size ≤ expirationIndex then
+  else if expirationIndex ≥ surface.impliedVols.size then
     none
   else
-    let ivs := surface.impliedVols.get! expirationIndex
+    let ivs := Array.getD surface.impliedVols expirationIndex #[]
     if ivs.size < 3 then none  -- Need at least 3 strikes
     else
-      let expiration := surface.expirations.get! expirationIndex
+      let expiration := List.getD surface.expirations expirationIndex 0.0
       let midIndex := ivs.size / 2
-      let atm_vol := ivs.get! midIndex
+      let atm_vol := Array.getD ivs midIndex 0.0
 
-      -- Extract slopes
-      let callIVs := ivs.extract midIndex ivs.size  -- Right side (higher strikes)
-      let putIVs := ivs.extract 0 midIndex         -- Left side (lower strikes)
-
-      let callSlope := if callIVs.size ≥ 2 then
-        let first := callIVs.get! 0
-        let last := callIVs.get! (callIVs.size - 1)
-        (last - first) / (callIVs.size.toFloat - 1)
+      -- Extract slopes from left side (lower strikes)
+      let putSlope := if midIndex ≥ 2 then
+        let first := Array.getD ivs 0 0.0
+        let last := Array.getD ivs (midIndex - 1) 0.0
+        (last - first) / midIndex.toFloat
       else
         0.0
 
-      let putSlope := if putIVs.size ≥ 2 then
-        let first := putIVs.get! 0
-        let last := putIVs.get! (putIVs.size - 1)
-        (last - first) / (putIVs.size.toFloat - 1)
+      -- Extract slopes from right side (higher strikes)
+      let callSlope := if ivs.size - midIndex ≥ 2 then
+        let first := Array.getD ivs midIndex 0.0
+        let last := Array.getD ivs (ivs.size - 1) 0.0
+        (last - first) / (ivs.size - midIndex).toFloat
       else
         0.0
 
       -- Butterfly (convexity) using 3-point rule
       let convex := if ivs.size ≥ 3 then
-        let left := ivs.get! 0
-        let mid := ivs.get! (ivs.size / 2)
-        let right := ivs.get! (ivs.size - 1)
+        let left := Array.getD ivs 0 0.0
+        let mid := Array.getD ivs (ivs.size / 2) 0.0
+        let right := Array.getD ivs (ivs.size - 1) 0.0
         2.0 * mid - (left + right) / 2.0
       else
         0.0
@@ -138,20 +136,23 @@ def analyzeTermStructure (surface : VolatilitySurface) (strikeIndex : Nat) :
   else if surface.impliedVols.size = 0 then
     none
   else
-    let strike := surface.strikes.get! strikeIndex
-    let mut ivs := Array.mkEmpty surface.expirations.length
-
-    for i in [0 : surface.expirations.length] do
+    let strike := List.getD surface.strikes strikeIndex 0.0
+    -- Build array of IVs at this strike across expirations
+    let ivs := Array.range (surface.impliedVols.size) |>.filterMap fun i =>
       if i < surface.impliedVols.size then
-        let row := surface.impliedVols.get! i
+        let row := Array.getD surface.impliedVols i #[]
         if strikeIndex < row.size then
-          ivs := ivs.push (row.get! strikeIndex)
+          some (Array.getD row strikeIndex 0.0)
+        else
+          none
+      else
+        none
 
     if ivs.size < 2 then
       none
     else
-      let shortTermVol := ivs.get! 0
-      let longTermVol := ivs.get! (ivs.size - 1)
+      let shortTermVol := Array.getD ivs 0 0.0
+      let longTermVol := Array.getD ivs (ivs.size - 1) 0.0
       let slope := longTermVol - shortTermVol
 
       let termType := if slope.abs < 0.01 then
@@ -320,22 +321,28 @@ def interpolateSurface
     none
   else
     -- Clamp to surface boundaries
-    let clamped_strike := min (max strike (surface.strikes.head!)) (surface.strikes.getLast!)
-    let clamped_exp := min (max expiration (surface.expirations.head!)) (surface.expirations.getLast!)
+    let minStrike := surface.strikes.head?.getD 0.0
+    let maxStrike := surface.strikes.getLast?.getD 0.0
+    let minExp := surface.expirations.head?.getD 0.0
+    let maxExp := surface.expirations.getLast?.getD 0.0
+    let clamped_strike := min (max strike minStrike) maxStrike
+    let clamped_exp := min (max expiration minExp) maxExp
 
     -- Simplified: return nearest point
     -- Full implementation would do proper bilinear interpolation
     if surface.impliedVols.isEmpty then
       none
     else
-      some (surface.impliedVols.get! 0 |>.get! 0)
+      match Array.getD surface.impliedVols 0 #[] with
+      | #[] => none
+      | row => some (Array.getD row 0 0.0)
 
 -- ============================================================================
 -- Result Aggregation
 -- ============================================================================
 
-/-- Comprehensive volatility surface analysis. -/
-structure VolatilitySurfaceAnalysis where
+/-- Comprehensive volatility surface smile and term structure analysis. -/
+structure SurfaceSmileTermAnalysis where
   smiles : List SmileAnalysis
   termStructures : List TermStructureAnalysis
   smileArbitrages : List SmileArbitrageOpportunity
@@ -344,20 +351,16 @@ structure VolatilitySurfaceAnalysis where
   smileConsistencyViolations : Nat
   termConsistencyViolations : Nat
 
-/-- Analyze entire volatility surface for arbitrage opportunities. -/
+/-- Analyze entire volatility surface for smile, skew, and term structure patterns. -/
 def analyzeSurface (surface : VolatilitySurface) :
-    VolatilitySurfaceAnalysis :=
-  let mut smiles := []
-  for i in [0 : surface.expirations.length] do
-    match analyzeSmile surface i with
-    | some smile => smiles := smiles.concat [smile]
-    | none => ()
+    SurfaceSmileTermAnalysis :=
+  -- Collect smiles across all expirations
+  let smiles := List.range surface.expirations.length |>.filterMap fun i =>
+    analyzeSmile surface i
 
-  let mut termStructures := []
-  for j in [0 : surface.strikes.length] do
-    match analyzeTermStructure surface j with
-    | some term => termStructures := termStructures.concat [term]
-    | none => ()
+  -- Collect term structures across all strikes
+  let termStructures := List.range surface.strikes.length |>.filterMap fun j =>
+    analyzeTermStructure surface j
 
   let smileArbitrages := findSmileArbitrage surface 0  -- Placeholder
   let totalOpps := smileArbitrages.length

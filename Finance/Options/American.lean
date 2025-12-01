@@ -65,17 +65,38 @@ def computeUDMultipliers (params : BinomialParams) :
 def terminalPayoffs (strike : Float) (spotPrice : Float) (u d : Float) (steps : Nat)
     (isCall : Bool) :
     Array Float :=
-  let mut payoffs := Array.mkEmpty (steps + 1)
-  for j in [0 : steps + 1] do
-    let upMoves := j
-    let downMoves := steps - j
+  Array.range (steps + 1) |>.map fun j =>
+    let upMoves := j.toFloat
+    let downMoves := (steps - j).toFloat
     let finalPrice := spotPrice * (u ^ upMoves) * (d ^ downMoves)
-    let intrinsic := if isCall then
+    if isCall then
       max 0 (finalPrice - strike)
     else
       max 0 (strike - finalPrice)
-    payoffs := payoffs.push intrinsic
-  payoffs
+
+/-- Backward induction helper: recursively compute option values through the tree. -/
+def backwardInductionRecursive
+    (strikePrice spotPrice : Float)
+    (values : Array Float)
+    (step : Nat)
+    (u d p discount : Float)
+    (isCall : Bool) :
+    Array Float :=
+  if step = 0 then
+    values
+  else
+    let nextValues := Array.range (step) |>.map fun j =>
+      let upPrice := spotPrice * (u ^ j.toFloat) * (d ^ (step - j).toFloat)
+      let upValue := Array.getD values (j + 1) 0
+      let downValue := Array.getD values j 0
+      let continuationValue := discount * (p * upValue + (1.0 - p) * downValue)
+      let intrinsic := if isCall then
+        max 0 (upPrice - strikePrice)
+      else
+        max 0 (strikePrice - upPrice)
+      max intrinsic continuationValue
+
+    backwardInductionRecursive strikePrice spotPrice nextValues (step - 1) u d p discount isCall
 
 /-- Backward induction: compute American option value with early exercise.
 
@@ -103,33 +124,12 @@ def backwardInduction
     let discount := Float.exp (-params.riskFreeRate * dt)
 
     -- Initialize with terminal payoffs
-    let mut values := terminalPayoffs strikePrice spotPrice u d steps isCall
+    let initialValues := terminalPayoffs strikePrice spotPrice u d steps isCall
 
     -- Backward induction through tree
-    let mut step := steps - 1
-    while step > 0 do
-      let mut nextValues := Array.mkEmpty (step + 1)
-      for j in [0 : step + 1] do
-        let upPrice := spotPrice * (u ^ j) * (d ^ (step - j))
+    let finalValues := backwardInductionRecursive strikePrice spotPrice initialValues (steps - 1) u d p discount isCall
 
-        -- European continuation value
-        let upValue := values.get! (j + 1)
-        let downValue := values.get! j
-        let continuationValue := discount * (p * upValue + (1.0 - p) * downValue)
-
-        -- Intrinsic value
-        let intrinsic := if isCall then
-          max 0 (upPrice - strikePrice)
-        else
-          max 0 (strikePrice - upPrice)
-
-        -- American: take max of exercise and continuation
-        let americanValue := max intrinsic continuationValue
-        nextValues := nextValues.push americanValue
-      values := nextValues
-      step := step - 1
-
-    values.get! 0  -- Return root node value
+    Array.getD finalValues 0 0
 
 -- ============================================================================
 -- American vs European Comparison
@@ -256,8 +256,12 @@ def shouldExerciseEarly
         spotPrice > investmentValue * 0.95  -- Some margin for uncertainty
       else
         -- For puts: early exercise if intrinsic > European value
-        let remainingTime := BinomialParams.mk params.volatility params.riskFreeRate
-          params.dividendYield timeToExpiry
+        let remainingTime : BinomialParams := {
+          volatility := params.volatility
+          riskFreeRate := params.riskFreeRate
+          dividendYield := params.dividendYield
+          timeToExpiry := timeToExpiry
+        }
         let europeanVal := backwardInduction strikePrice spotPrice remainingTime false
         intrinsic > europeanVal * 0.95
 
