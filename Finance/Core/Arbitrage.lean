@@ -47,19 +47,25 @@ theorem profit_positive (a : Arbitrage) : a.profit > 0 := by
   unfold profit
   cases a.isArb with
   | inl h =>
+    -- Case: initialCost ≤ 0 and minimumPayoff > 0
+    -- Then minimumPayoff - initialCost > 0 - 0 = 0
     have ⟨hc, hp⟩ := h
-    sorry  -- Requires Float arithmetic reasoning
+    linarith
   | inr h =>
+    -- Case: initialCost < 0 and minimumPayoff ≥ 0
+    -- Then minimumPayoff - initialCost ≥ 0 - initialCost > 0 (since initialCost < 0)
     have ⟨hc, hp⟩ := h
-    sorry  -- Requires Float arithmetic reasoning
+    linarith
 
 /-- An arbitrage has non-negative payoff in all cases. -/
 theorem payoff_nonneg (a : Arbitrage) : a.minimumPayoff ≥ 0 := by
   cases a.isArb with
   | inl h =>
+    -- Case: initialCost ≤ 0 and minimumPayoff > 0
     have ⟨_, hp⟩ := h
-    sorry  -- Requires Float arithmetic reasoning
+    linarith
   | inr h =>
+    -- Case: initialCost < 0 and minimumPayoff ≥ 0
     have ⟨_, hp⟩ := h
     exact hp
 
@@ -69,7 +75,9 @@ theorem cost_nonpos (a : Arbitrage) : a.initialCost ≤ 0 := by
   | inl h =>
     exact h.1
   | inr h =>
-    sorry  -- Requires Float arithmetic reasoning
+    -- Case: initialCost < 0 implies initialCost ≤ 0
+    have ⟨hc, _⟩ := h
+    linarith
 
 end Arbitrage
 
@@ -140,6 +148,7 @@ theorem no_arb_if_fees_exceed_profit
     {a : Arbitrage} {fees : Float} (hf : fees ≥ 0) (h : a.profit ≤ fees) :
     ¬(a.profit - fees > 0) := by
   intro hneg
-  sorry  -- Requires Float arithmetic reasoning
+  -- If a.profit ≤ fees, then a.profit - fees ≤ 0, so it cannot be > 0
+  linarith
 
 end Finance
