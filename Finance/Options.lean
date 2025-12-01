@@ -5,4 +5,5 @@ import Finance.Options.European
 import Finance.Options.Bounds
 import Finance.Options.Monotonicity
 import Finance.Options.Convexity
+import Finance.Options.Calendar
 import Finance.Options.Scanner
