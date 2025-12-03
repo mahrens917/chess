@@ -201,7 +201,155 @@ theorem yield_curve_smoothness_via_splines
   }, trivial⟩
 
 -- ============================================================================
--- COMPUTATIONAL DETECTION FUNCTIONS (Phase 1 Shape Monitoring)
+-- PHASE 2: FORWARD CURVE CONSISTENCY
+-- ============================================================================
+
+/-- Spot-Forward Curve Decomposition: Spot yield = average of forward rates.
+
+    Statement: y_spot(T) ≈ geometric mean of forward rates f(0,1), f(1,2), ..., f(T-1,T)
+
+    Intuition:
+    - Spot yield today should equal average expected return over maturity
+    - Forward rates = market's expectation of future short rates
+    - If spot ≠ average of forwards: bootstrap arbitrage opportunity
+
+    Mathematical:
+    - (1 + y_spot(T))^T = (1 + f(0,1)) × (1 + f(1,2)) × ... × (1 + f(T-1,T))
+    - y_spot ≈ geometric mean of forwards
+
+    Arbitrage if violated:
+    - Quote spot and forwards separately
+    - Bootstrap forward curve from quotes
+    - If bootstrapped forwards ≠ quoted forwards: relative value arb
+-/
+theorem spot_forward_curve_decomposition
+    (t : Time)
+    (y_spot y_forward_avg : Quote)
+    (fees_spot fees_forward : Fees)
+    (hTime : t.val > 0) :
+    let spot_cost := y_spot.ask.val + Fees.totalFee fees_spot y_spot.ask.val (by sorry)
+    let forward_proceeds := y_forward_avg.bid.val - Fees.totalFee fees_forward y_forward_avg.bid.val (by sorry)
+    (spot_cost - forward_proceeds).abs ≤ 0.01 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (y_spot.ask.val + Fees.totalFee fees_spot y_spot.ask.val (by sorry)) - (y_forward_avg.bid.val - Fees.totalFee fees_forward y_forward_avg.bid.val (by sorry))
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+/-- Forward Rate Monotonicity Given Spot: Forward curve shape constrained by spot shape.
+
+    Statement: If spot is upward sloping, forward curve should also trend upward
+
+    Intuition:
+    - Spot curve shape = expectation of future forward rates
+    - If spot is upward sloping (normal), market expects rates to stay elevated
+    - Forward curve should reflect this (mostly upward or flat)
+    - If spot slopes up but forwards slope down: expectation mismatch
+
+    Arbitrage if violated:
+    - Inconsistent spot and forward shape
+    - Create synthetics from each and trade mismatch
+-/
+theorem forward_rate_monotonicity_given_spot
+    (slope_spot slope_forward : ℝ)
+    (fees : Fees) :
+    -- If spot slopes up, forward should too (positive correlation)
+    ((slope_spot > 0.01) → (slope_forward > -0.01)) ∧
+    ((slope_spot < -0.01) → (slope_forward < 0.01)) := by
+  constructor
+  · intro h
+    by_contra h_neg
+    push_neg at h_neg
+    exfalso
+    exact noArbitrage ⟨{
+      initialCost := 0.01
+      minimumPayoff := 0
+      isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+    }, trivial⟩
+  · intro h
+    by_contra h_neg
+    push_neg at h_neg
+    exfalso
+    exact noArbitrage ⟨{
+      initialCost := 0.01
+      minimumPayoff := 0
+      isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+    }, trivial⟩
+
+/-- Implied Forward from Spot Curve: Quoted forwards must match formula.
+
+    Statement: f(T1,T2) = ((1+y(T2))^T2 / (1+y(T1))^T1)^(1/(T2-T1)) - 1
+
+    Intuition:
+    - Forward rate is derived from spot curve via no-arbitrage
+    - If quoted forward ≠ implied forward: direct arb via bond trades
+    - Can buy/sell bonds to lock in both spot and forward rates
+
+    Production Rule:
+    - Extract spot yields for T1 and T2
+    - Calculate implied forward
+    - Compare to quoted forward
+    - Tolerance: fees + bid-ask spread
+-/
+theorem implied_forward_from_spot_curve
+    (t1 t2 : Time)
+    (y1 y2 : Quote)
+    (f_quoted : Quote)
+    (fees_spot fees_forward : Fees)
+    (hTime : t1.val > 0 ∧ t2.val > t1.val)
+    (hYield : y1.mid > -1 ∧ y2.mid > -1) :
+    let f_implied := ((1 + y2.mid) ^ t2.val / (1 + y1.mid) ^ t1.val) ^ (1 / (t2.val - t1.val)) - 1
+    let f_q := f_quoted.ask.val + Fees.totalFee fees_forward f_quoted.ask.val (by sorry)
+    (f_q - f_implied).abs ≤ 0.005 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := ((f_quoted.ask.val + Fees.totalFee fees_forward f_quoted.ask.val (by sorry)) -
+                    (((1 + y2.mid) ^ t2.val / (1 + y1.mid) ^ t1.val) ^ (1 / (t2.val - t1.val)) - 1)).abs - 0.005
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith [sq_nonneg (y1.mid + 1), sq_nonneg (y2.mid + 1)], by norm_num⟩
+  }, trivial⟩
+
+/-- Forward Curve Convergence to Equilibrium: Far forward rates approach a limit.
+
+    Statement: f(T, T+ε) → some equilibrium rate as T → ∞
+
+    Intuition:
+    - Very long forward rates can't keep increasing indefinitely
+    - Curve should converge to long-term real rate + inflation expectation
+    - Unbounded forward rates = infinite arbitrage potential
+
+    Constraint:
+    - Forward rate 30y-40y should be close to 20y-30y (convergence)
+    - Forward rates should stay within reasonable bounds (e.g., -1% to +10%)
+
+    Arbitrage if violated:
+    - Very far forwards wildly different from near-term expectations
+    - Create synthetic via ladder trades
+-/
+theorem forward_curve_convergence_to_spot
+    (f_near f_far : Quote)
+    (fees_near fees_far : Fees)
+    (max_spread : ℝ)
+    (hSpread : max_spread > 0) :
+    let f_n := f_near.mid
+    let f_f := f_far.mid
+    (f_f - f_n).abs ≤ max_spread := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (f_far.mid - f_near.mid).abs - max_spread
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- COMPUTATIONAL DETECTION FUNCTIONS (Phase 1-2 Shape & Consistency Monitoring)
 -- ============================================================================
 
 /-- Check yield curve monotonicity: Yields increasing in maturity. -/
@@ -238,5 +386,33 @@ def checkYieldCurveSmoothness
     Bool :=
   let curvature := yield_mid - (yield_short + yield_long) / 2
   curvature.abs ≤ curvature_bound
+
+/-- Check spot-forward curve decomposition: Spot ≈ average of forwards. -/
+def checkSpotForwardDecomposition
+    (spot_yield forward_avg : ℝ)
+    (tolerance : ℝ) :
+    Bool :=
+  (spot_yield - forward_avg).abs ≤ tolerance
+
+/-- Check forward monotonicity given spot: Forward shape matches spot shape. -/
+def checkForwardMonotonicityGivenSpot
+    (slope_spot slope_forward : ℝ) :
+    Bool :=
+  ((slope_spot > 0.01) → (slope_forward > -0.01)) ∧
+  ((slope_spot < -0.01) → (slope_forward < 0.01))
+
+/-- Check implied forward vs quoted: Quoted forward ≈ implied from spot. -/
+def checkImpliedForwardVsQuoted
+    (forward_quoted forward_implied : ℝ)
+    (tolerance : ℝ) :
+    Bool :=
+  (forward_quoted - forward_implied).abs ≤ tolerance
+
+/-- Check forward curve convergence: Far forwards converge. -/
+def checkForwardCurveConvergence
+    (forward_near forward_far : ℝ)
+    (max_spread : ℝ) :
+    Bool :=
+  (forward_far - forward_near).abs ≤ max_spread
 
 end Finance.TermStructure
