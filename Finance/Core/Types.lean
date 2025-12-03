@@ -27,25 +27,25 @@ def toFloat (r : PosReal) : ℝ := r.val
 
 /-- Addition of positive reals (result is positive). -/
 def add (a b : PosReal) : PosReal :=
-  ⟨a.val + b.val, by sorry⟩
+  ⟨a.val + b.val, by linarith [a.pos, b.pos]⟩
 
 /-- Multiplication of positive reals. -/
 def mul (a b : PosReal) : PosReal :=
-  ⟨a.val * b.val, by sorry⟩
+  ⟨a.val * b.val, by nlinarith [a.pos, b.pos]⟩
 
 /-- Scalar multiplication by positive constant. -/
 def smul (c : ℝ) (r : PosReal) (hc : c > 0) : PosReal :=
-  ⟨c * r.val, by sorry⟩
+  ⟨c * r.val, by nlinarith [hc, r.pos]⟩
 
 /-- Maximum of two positive reals. -/
 noncomputable def max (a b : PosReal) : PosReal :=
   let m := if a.val > b.val then a.val else b.val
-  ⟨m, by sorry⟩
+  ⟨m, by nlinarith [a.pos, b.pos]⟩
 
 /-- Minimum of two positive reals. -/
 noncomputable def min (a b : PosReal) : PosReal :=
   let m := if a.val < b.val then a.val else b.val
-  ⟨m, by sorry⟩
+  ⟨m, by nlinarith [a.pos, b.pos]⟩
 
 end PosReal
 
@@ -105,14 +105,14 @@ def mk' {f p : ℝ} (hf : f ≥ 0) (hp : p ≥ 0) : Fees :=
   ⟨f, p, hf, hp⟩
 
 /-- Zero fees. -/
-def zero : Fees := ⟨0, 0, by sorry, by sorry⟩
+def zero : Fees := ⟨0, 0, by norm_num, by norm_num⟩
 
 /-- Typical brokerage fees: $2 fixed + 5bps proportional. -/
-def typical : Fees := ⟨2.0, 0.0005, by sorry, by sorry⟩
+def typical : Fees := ⟨2.0, 0.0005, by norm_num, by norm_num⟩
 
 /-- Calculate total fee for a transaction of given size.
     total_fee = fixed + proportional * amount -/
-def totalFee (fees : Fees) (amount : ℝ) (ha : amount ≥ 0) : ℝ :=
+def totalFee (fees : Fees) (amount : ℝ) (_ : amount ≥ 0) : ℝ :=
   fees.fixed + fees.proportional * amount
 
 end Fees
@@ -133,16 +133,16 @@ namespace Time
 def mk' {t : ℝ} (h : t ≥ 0) : Time := ⟨t, h⟩
 
 /-- Immediate expiry. -/
-def now : Time := ⟨0, by sorry⟩
+def now : Time := ⟨0, by norm_num⟩
 
 /-- One year. -/
-def oneYear : Time := ⟨1, by sorry⟩
+def oneYear : Time := ⟨1, by norm_num⟩
 
 /-- Six months. -/
-def sixMonths : Time := ⟨0.5, by sorry⟩
+def sixMonths : Time := ⟨0.5, by norm_num⟩
 
 /-- Three months. -/
-def threeMonths : Time := ⟨0.25, by sorry⟩
+def threeMonths : Time := ⟨0.25, by norm_num⟩
 
 /-- Extract time value as real (preferred over direct .val access). -/
 def toFloat (t : Time) : ℝ := t.val
@@ -199,7 +199,7 @@ def mk' {k : ℝ} (h : k > 0) : Strike :=
   ⟨k, h⟩
 
 /-- Strike price of 100. -/
-def atMoney : Strike := ⟨100.0, by sorry⟩
+def atMoney : Strike := ⟨100.0, by norm_num⟩
 
 end Strike
 

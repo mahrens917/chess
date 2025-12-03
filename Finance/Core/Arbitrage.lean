@@ -50,12 +50,12 @@ theorem profit_positive (a : Arbitrage) : a.profit > 0 := by
     -- Case: initialCost ≤ 0 and minimumPayoff > 0
     -- Then minimumPayoff - initialCost > 0 - 0 = 0
     have ⟨hc, hp⟩ := h
-    sorry  -- Float arithmetic: payoff > 0 and cost ≤ 0 => payoff - cost > 0
+    linarith [hp, hc]
   | inr h =>
     -- Case: initialCost < 0 and minimumPayoff ≥ 0
     -- Then minimumPayoff - initialCost ≥ 0 - initialCost > 0 (since initialCost < 0)
     have ⟨hc, hp⟩ := h
-    sorry  -- Float arithmetic: payoff ≥ 0 and cost < 0 => payoff - cost > 0
+    linarith [hc, hp]
 
 /-- An arbitrage has non-negative payoff in all cases. -/
 theorem payoff_nonneg (a : Arbitrage) : a.minimumPayoff ≥ 0 := by
@@ -63,7 +63,7 @@ theorem payoff_nonneg (a : Arbitrage) : a.minimumPayoff ≥ 0 := by
   | inl h =>
     -- Case: initialCost ≤ 0 and minimumPayoff > 0
     have ⟨_, hp⟩ := h
-    sorry  -- Float comparison: payoff > 0 implies payoff ≥ 0
+    linarith [hp]
   | inr h =>
     -- Case: initialCost < 0 and minimumPayoff ≥ 0
     have ⟨_, hp⟩ := h
@@ -77,7 +77,7 @@ theorem cost_nonpos (a : Arbitrage) : a.initialCost ≤ 0 := by
   | inr h =>
     -- Case: initialCost < 0 implies initialCost ≤ 0
     have ⟨hc, _⟩ := h
-    sorry  -- Float comparison: cost < 0 implies cost ≤ 0
+    linarith [hc]
 
 end Arbitrage
 
@@ -133,7 +133,7 @@ theorem contrapositive_is_detection {P : Prop} :
     (¬P → ∃ a : Arbitrage, True) := by
   intro h hnp
   exfalso
-  exact noArbitrage (by sorry : ∃ a : Arbitrage, True)
+  exact noArbitrage ⟨⟨0, 0, Or.inl ⟨by norm_num, by norm_num⟩⟩, trivial⟩
 
 -- ============================================================================
 -- No-Arbitrage with Fees
@@ -145,11 +145,11 @@ theorem contrapositive_is_detection {P : Prop} :
     the total fees incurred, it's not exploitable.
 -/
 theorem no_arb_if_fees_exceed_profit
-    {a : Arbitrage} {fees : ℝ} (hf : fees ≥ 0) (h : a.profit ≤ fees) :
+    {a : Arbitrage} {fees : ℝ} (_ : fees ≥ 0) (h : a.profit ≤ fees) :
     ¬(a.profit - fees > 0) := by
   intro hneg
   -- If a.profit ≤ fees, then a.profit - fees ≤ 0, so it cannot be > 0
-  sorry  -- Real arithmetic: profit ≤ fees => profit - fees ≤ 0, contradiction with > 0
+  linarith [h, hneg]
 
 -- ============================================================================
 -- COMPUTATIONAL DETECTION FUNCTIONS (Standard 5)
