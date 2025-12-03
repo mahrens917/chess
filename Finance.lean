@@ -17,3 +17,4 @@ import Finance.DividendArbitrage
 import Finance.SwapBasis
 import Finance.TermStructure
 import Finance.ConvertibleBonds
+import Finance.CryptoPerpetualsAndFunding
