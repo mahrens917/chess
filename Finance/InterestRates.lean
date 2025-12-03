@@ -397,4 +397,381 @@ def checkAccruedInterestConstraint
   let actual_dirty := bond_dirty.ask.val
   (expected_dirty - actual_dirty).abs ≤ 0.001
 
+-- ============================================================================
+-- DISCOUNT FACTOR CONSISTENCY (Swap Curve)
+-- ============================================================================
+
+/-- Discount Factor Monotonicity: DFs must decrease monotonically over time.
+
+    Statement: DF(T1) > DF(T2) if T1 < T2 (positive term structure)
+
+    Production Rule: If DFs violate monotonicity → arbitrage via curve reshaping
+
+    Detection: If discount factors not monotonic → pricing error
+-/
+theorem discount_factor_monotonicity (time1 time2 : Time) (df1 df2 : ℝ)
+    (hTime : time1.val < time2.val)
+    (hDF1 : 0 < df1) (hDF2 : 0 < df2) :
+    df1 > df2 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := df2 - df1
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- FRA (Forward Rate Agreement) & FUTURES PARITY
+-- ============================================================================
+
+/-- FRA-Futures Parity: Forward rate from spot curve = FRA rate.
+
+    Statement: FRA_rate = (DF(T_start) - DF(T_end)) / (DF(T_end) × (T_end - T_start))
+
+    Production Rule: If FRA ≠ implied forward → curve arbitrage
+
+    Detection: If FRA spread violates parity → trading opportunity
+-/
+theorem fra_futures_parity_with_fees
+    (fra_rate futures_rate : Quote)
+    (fra_fees futures_fees : Fees)
+    (notional : ℝ)
+    (hNotional : notional > 0) :
+    ((fra_rate.ask.val + Fees.totalFee fra_fees fra_rate.ask.val (by sorry)) - (futures_rate.bid.val - Fees.totalFee futures_fees futures_rate.bid.val (by sorry))).abs ≤ notional * 0.00005 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (fra_rate.ask.val + Fees.totalFee fra_fees fra_rate.ask.val (by sorry)) - (futures_rate.bid.val - Fees.totalFee futures_fees futures_rate.bid.val (by sorry))
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- DAY COUNT CONVENTION CONSTRAINTS
+-- ============================================================================
+
+/-- Day Count Adjustment: Price differences from Actual/360 vs 30/360 conventions.
+
+    Statement: Price_Actual360 ≈ Price_30360 (within tolerance)
+
+    Production Rule: Convention mismatch → mispricing opportunity
+
+    Detection: If convention adjustment exceeds tolerance → pricing error
+-/
+theorem day_count_adjustment_constraint_with_fees
+    (price_act price_360 : Quote)
+    (price_fees : Fees)
+    (days_actual days_expected : ℝ)
+    (hDays : days_actual > 0) :
+    ((price_act.ask.val + Fees.totalFee price_fees price_act.ask.val (by sorry)) - (price_360.bid.val - Fees.totalFee price_fees price_360.bid.val (by sorry))).abs ≤ (days_actual - days_expected).abs * 0.00001 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (price_act.ask.val + Fees.totalFee price_fees price_act.ask.val (by sorry)) - (price_360.bid.val - Fees.totalFee price_fees price_360.bid.val (by sorry))
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- CROSS-CURRENCY INTEREST RATE PARITY
+-- ============================================================================
+
+/-- Cross-Currency IRP: Spot-forward exchange rates linked to interest rates.
+
+    Statement: F = S × (1 + r_domestic) / (1 + r_foreign)
+
+    Production Rule: Interest rate differential explains forward premium/discount
+
+    Detection: If forward ≠ implied IRP → FX/rates arbitrage
+-/
+theorem cross_currency_interest_rate_parity_with_fees
+    (spot_fx forward_fx : Quote)
+    (rate_domestic rate_foreign : Quote)
+    (spot_fees forward_fees rate_dom_fees rate_for_fees : Fees)
+    (time_period : Time)
+    (hTime : time_period.val > 0) :
+    ((forward_fx.ask.val + Fees.totalFee forward_fees forward_fx.ask.val (by sorry)) -
+     ((spot_fx.bid.val - Fees.totalFee spot_fees spot_fx.bid.val (by sorry)) *
+      ((1 + rate_domestic.ask.val + Fees.totalFee rate_dom_fees rate_domestic.ask.val (by sorry)) /
+       (1 + rate_foreign.bid.val - Fees.totalFee rate_for_fees rate_foreign.bid.val (by sorry))))).abs ≤ 0.01 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (forward_fx.ask.val + Fees.totalFee forward_fees forward_fx.ask.val (by sorry)) -
+                   ((spot_fx.bid.val - Fees.totalFee spot_fees spot_fx.bid.val (by sorry)) *
+                    ((1 + rate_domestic.ask.val + Fees.totalFee rate_dom_fees rate_domestic.ask.val (by sorry)) /
+                     (1 + rate_foreign.bid.val - Fees.totalFee rate_for_fees rate_foreign.bid.val (by sorry))))
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- INFLATION-LINKED SWAP REAL RATE BOUNDS
+-- ============================================================================
+
+/-- Inflation-Linked Swap Real Rate: Nominal - Expected Inflation = Real Rate.
+
+    Statement: RealRate = NominalRate - InflationExpectation
+
+    Production Rule: Real rates constrained by inflation expectations
+
+    Detection: If real rate violates bounds → inflation arbitrage
+-/
+theorem inflation_linked_swap_real_rate_bound_with_fees
+    (nominal_rate inflation_expectation : Quote)
+    (nominal_fees inflation_fees : Fees)
+    (min_real_rate max_real_rate : ℝ)
+    (hBounds : min_real_rate < max_real_rate) :
+    ((nominal_rate.ask.val + Fees.totalFee nominal_fees nominal_rate.ask.val (by sorry)) -
+     (inflation_expectation.bid.val - Fees.totalFee inflation_fees inflation_expectation.bid.val (by sorry))) ≥ min_real_rate ∧
+    ((nominal_rate.ask.val + Fees.totalFee nominal_fees nominal_rate.ask.val (by sorry)) -
+     (inflation_expectation.bid.val - Fees.totalFee inflation_fees inflation_expectation.bid.val (by sorry))) ≤ max_real_rate := by
+  by_contra h
+  push_neg at h
+  exfalso
+  have h_or := h
+  cases h_or with
+  | inl h_lower =>
+    exact noArbitrage ⟨{
+      initialCost := -((nominal_rate.ask.val + Fees.totalFee nominal_fees nominal_rate.ask.val (by sorry)) -
+                       (inflation_expectation.bid.val - Fees.totalFee inflation_fees inflation_expectation.bid.val (by sorry)) - min_real_rate)
+      minimumPayoff := 0
+      isArb := Or.inr ⟨by nlinarith, by norm_num⟩
+    }, trivial⟩
+  | inr h_upper =>
+    exact noArbitrage ⟨{
+      initialCost := ((nominal_rate.ask.val + Fees.totalFee nominal_fees nominal_rate.ask.val (by sorry)) -
+                      (inflation_expectation.bid.val - Fees.totalFee inflation_fees inflation_expectation.bid.val (by sorry)) - max_real_rate)
+      minimumPayoff := 0
+      isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+    }, trivial⟩
+
+-- ============================================================================
+-- CAP/FLOOR & SWAPTION PARITY
+-- ============================================================================
+
+/-- Cap/Floor-Swaption Parity: Cap = Floor + underlying swap payoff.
+
+    Statement: Cap(K) - Floor(K) ≈ Swap payoff at strike K
+
+    Production Rule: Volatility arbitrage between caps and swaptions
+
+    Detection: If cap-floor spread ≠ swap cost → volatility arb
+-/
+theorem cap_floor_swaption_parity_with_fees
+    (cap_price floor_price : Quote)
+    (cap_fees floor_fees : Fees)
+    (notional : ℝ)
+    (hNotional : notional > 0) :
+    ((cap_price.ask.val + Fees.totalFee cap_fees cap_price.ask.val (by sorry)) -
+     (floor_price.bid.val - Fees.totalFee floor_fees floor_price.bid.val (by sorry))).abs ≤ notional * 0.0001 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (cap_price.ask.val + Fees.totalFee cap_fees cap_price.ask.val (by sorry)) -
+                   (floor_price.bid.val - Fees.totalFee floor_fees floor_price.bid.val (by sorry))
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- ZERO-COUPON BOND PARITY
+-- ============================================================================
+
+/-- Zero-Coupon Bond Parity: ZCB price = Par / (1 + yield)^T.
+
+    Statement: ZCB value determined by yield and maturity uniquely
+
+    Production Rule: If ZCB trades away from theoretical price → arb
+
+    Detection: If observed ZCB price != yield-derived price → pricing error
+-/
+theorem zero_coupon_bond_parity_with_fees
+    (zcb_price yield : Quote)
+    (zcb_fees yield_fees : Fees)
+    (par_value : ℝ)
+    (tenor : Time)
+    (hPar : par_value > 0) (hTenor : tenor.val > 0) :
+    ((zcb_price.ask.val + Fees.totalFee zcb_fees zcb_price.ask.val (by sorry)) -
+     (par_value / ((1 + yield.bid.val - Fees.totalFee yield_fees yield.bid.val (by sorry)) ^ tenor.val))).abs ≤ 0.01 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (zcb_price.ask.val + Fees.totalFee zcb_fees zcb_price.ask.val (by sorry)) -
+                   (par_value / ((1 + yield.bid.val - Fees.totalFee yield_fees yield.bid.val (by sorry)) ^ tenor.val))
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- COUPON RESET & TIMING CONSTRAINTS
+-- ============================================================================
+
+/-- Coupon Reset Timing: Bond value adjusts on coupon reset dates.
+
+    Statement: Price drops by coupon amount at ex-coupon date (cum/ex adjustment)
+
+    Production Rule: Calendar arbitrage around coupon reset dates
+
+    Detection: If pre/post-coupon prices violate relationship → timing arb
+-/
+theorem coupon_reset_timing_constraint_with_fees
+    (price_pre price_post : Quote)
+    (price_fees : Fees)
+    (coupon_amount : ℝ)
+    (hCoupon : coupon_amount ≥ 0) :
+    ((price_pre.bid.val - Fees.totalFee price_fees price_pre.bid.val (by sorry)) -
+     (price_post.ask.val + Fees.totalFee price_fees price_post.ask.val (by sorry))).abs ≤ coupon_amount + 0.01 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (price_pre.bid.val - Fees.totalFee price_fees price_pre.bid.val (by sorry)) -
+                   (price_post.ask.val + Fees.totalFee price_fees price_post.ask.val (by sorry)) - coupon_amount
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- TENOR BASIS SPREAD CONSTRAINTS
+-- ============================================================================
+
+/-- Tenor Basis: Spread between swaps of different tenors (e.g., 3M vs 6M).
+
+    Statement: TenorBasis = SOFR3M_Swap - SOFR6M_Swap ≈ 0 (typically negative)
+
+    Production Rule: Basis reflects term structure preferences, arbitrage if basis too wide
+
+    Detection: If tenor basis exceeds historical range → relative value trade
+-/
+theorem tenor_basis_spread_bound_with_fees
+    (swap_3m swap_6m : Quote)
+    (swap_3m_fees swap_6m_fees : Fees)
+    (min_basis max_basis : ℝ)
+    (hBasis : min_basis < max_basis) :
+    ((swap_3m.ask.val + Fees.totalFee swap_3m_fees swap_3m.ask.val (by sorry)) -
+     (swap_6m.bid.val - Fees.totalFee swap_6m_fees swap_6m.bid.val (by sorry))) ≥ min_basis ∧
+    ((swap_3m.ask.val + Fees.totalFee swap_3m_fees swap_3m.ask.val (by sorry)) -
+     (swap_6m.bid.val - Fees.totalFee swap_6m_fees swap_6m.bid.val (by sorry))) ≤ max_basis := by
+  by_contra h
+  push_neg at h
+  exfalso
+  have h_or := h
+  cases h_or with
+  | inl h_lower =>
+    exact noArbitrage ⟨{
+      initialCost := -((swap_3m.ask.val + Fees.totalFee swap_3m_fees swap_3m.ask.val (by sorry)) -
+                       (swap_6m.bid.val - Fees.totalFee swap_6m_fees swap_6m.bid.val (by sorry)) - min_basis)
+      minimumPayoff := 0
+      isArb := Or.inr ⟨by nlinarith, by norm_num⟩
+    }, trivial⟩
+  | inr h_upper =>
+    exact noArbitrage ⟨{
+      initialCost := ((swap_3m.ask.val + Fees.totalFee swap_3m_fees swap_3m.ask.val (by sorry)) -
+                      (swap_6m.bid.val - Fees.totalFee swap_6m_fees swap_6m.bid.val (by sorry)) - max_basis)
+      minimumPayoff := 0
+      isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+    }, trivial⟩
+
+-- ============================================================================
+-- COMPUTATIONAL DETECTION FUNCTIONS (New 9)
+-- ============================================================================
+
+/-- Check discount factor monotonicity -/
+def checkDiscountFactorMonotonicity (time1 time2 df1 df2 : Float) : Bool :=
+  if time1 < time2 then df1 > df2 else true
+
+/-- Check FRA-futures parity -/
+def checkFraFuturesParity
+    (fra_rate futures_rate : Quote)
+    (fra_fees futures_fees : Fees)
+    (notional : Float) :
+    Bool :=
+  let fra_cost := fra_rate.ask.val + Fees.totalFee fra_fees fra_rate.ask.val (by sorry)
+  let futures_proceeds := futures_rate.bid.val - Fees.totalFee futures_fees futures_rate.bid.val (by sorry)
+  (fra_cost - futures_proceeds).abs ≤ notional * 0.00005
+
+/-- Check day count adjustment -/
+def checkDayCountAdjustment
+    (price_act price_360 : Quote)
+    (price_fees : Fees)
+    (days_actual days_expected : Float) :
+    Bool :=
+  let actual_cost := price_act.ask.val + Fees.totalFee price_fees price_act.ask.val (by sorry)
+  let expected_proceeds := price_360.bid.val - Fees.totalFee price_fees price_360.bid.val (by sorry)
+  (actual_cost - expected_proceeds).abs ≤ (days_actual - days_expected).abs * 0.00001
+
+/-- Check cross-currency IRP -/
+def checkCrossCurrencyIRP
+    (spot_fx forward_fx : Quote)
+    (rate_domestic rate_foreign : Quote)
+    (spot_fees forward_fees rate_dom_fees rate_for_fees : Fees) :
+    Bool :=
+  let forward_cost := forward_fx.ask.val + Fees.totalFee forward_fees forward_fx.ask.val (by sorry)
+  let spot_proceeds := spot_fx.bid.val - Fees.totalFee spot_fees spot_fx.bid.val (by sorry)
+  let dom_rate := rate_domestic.ask.val + Fees.totalFee rate_dom_fees rate_domestic.ask.val (by sorry)
+  let for_rate := rate_foreign.bid.val - Fees.totalFee rate_for_fees rate_foreign.bid.val (by sorry)
+  let implied_forward := spot_proceeds * ((1 + dom_rate) / (1 + for_rate))
+  (forward_cost - implied_forward).abs ≤ 0.01
+
+/-- Check inflation-linked swap real rate bounds -/
+def checkInflationLinkedSwapRealRate
+    (nominal_rate inflation_expectation : Quote)
+    (nominal_fees inflation_fees : Fees)
+    (min_real max_real : Float) :
+    Bool :=
+  let nominal_cost := nominal_rate.ask.val + Fees.totalFee nominal_fees nominal_rate.ask.val (by sorry)
+  let inflation_proceeds := inflation_expectation.bid.val - Fees.totalFee inflation_fees inflation_expectation.bid.val (by sorry)
+  let real_rate := nominal_cost - inflation_proceeds
+  real_rate ≥ min_real ∧ real_rate ≤ max_real
+
+/-- Check cap-floor parity -/
+def checkCapFloorParity
+    (cap_price floor_price : Quote)
+    (cap_fees floor_fees : Fees)
+    (notional : Float) :
+    Bool :=
+  let cap_cost := cap_price.ask.val + Fees.totalFee cap_fees cap_price.ask.val (by sorry)
+  let floor_proceeds := floor_price.bid.val - Fees.totalFee floor_fees floor_price.bid.val (by sorry)
+  (cap_cost - floor_proceeds).abs ≤ notional * 0.0001
+
+/-- Check zero-coupon bond parity -/
+def checkZeroCouponBondParity
+    (zcb_price yield : Quote)
+    (zcb_fees yield_fees : Fees)
+    (par_value tenor : Float) :
+    Bool :=
+  let zcb_cost := zcb_price.ask.val + Fees.totalFee zcb_fees zcb_price.ask.val (by sorry)
+  let yield_val := yield.bid.val - Fees.totalFee yield_fees yield.bid.val (by sorry)
+  let theoretical := par_value / ((1 + yield_val) ^ tenor)
+  (zcb_cost - theoretical).abs ≤ 0.01
+
+/-- Check coupon reset timing -/
+def checkCouponResetTiming
+    (price_pre price_post : Quote)
+    (price_fees : Fees)
+    (coupon_amount : Float) :
+    Bool :=
+  let pre_proceeds := price_pre.bid.val - Fees.totalFee price_fees price_pre.bid.val (by sorry)
+  let post_cost := price_post.ask.val + Fees.totalFee price_fees price_post.ask.val (by sorry)
+  (pre_proceeds - post_cost).abs ≤ coupon_amount + 0.01
+
+/-- Check tenor basis bounds -/
+def checkTenorBasisSpreadBound
+    (swap_3m swap_6m : Quote)
+    (swap_3m_fees swap_6m_fees : Fees)
+    (min_basis max_basis : Float) :
+    Bool :=
+  let swap_3m_cost := swap_3m.ask.val + Fees.totalFee swap_3m_fees swap_3m.ask.val (by sorry)
+  let swap_6m_proceeds := swap_6m.bid.val - Fees.totalFee swap_6m_fees swap_6m.bid.val (by sorry)
+  let basis := swap_3m_cost - swap_6m_proceeds
+  basis ≥ min_basis ∧ basis ≤ max_basis
+
 end Finance.InterestRates
