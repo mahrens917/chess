@@ -15,3 +15,4 @@ import Finance.ArbitrageDetection
 import Finance.BondConvexity
 import Finance.DividendArbitrage
 import Finance.SwapBasis
+import Finance.TermStructure
