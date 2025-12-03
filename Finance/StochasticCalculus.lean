@@ -58,7 +58,7 @@ end Martingale
     - If Ito's lemma not applied correctly: hedge ratios wrong, generates arbitrage
     - Correct Ito application → no-arbitrage portfolio construction possible
 -/
-theorem itos_lemma_constraint (f_t f_x f_xx mu sigma : Float)
+theorem itos_lemma_constraint (f_t f_x f_xx mu sigma : ℝ)
     (dt : Time)
     (hSigma : sigma ≥ 0)
     (hDt : dt.val > 0) :
@@ -69,7 +69,7 @@ theorem itos_lemma_constraint (f_t f_x f_xx mu sigma : Float)
     -- The formula must hold (within discretization error)
     (drift_term ^ 2 + diffusion_coefficient ^ 2) ≥ 0 := by
   simp only
-  sorry  -- Float arithmetic: sum of squares is always ≥ 0
+  nlinarith [sq_nonneg (drift_term), sq_nonneg (diffusion_coefficient)]
 
 /-- Log-normal property preservation: If S ~ GBM, then ln(S) is arithmetic BM.
 
@@ -83,19 +83,19 @@ theorem itos_lemma_constraint (f_t f_x f_xx mu sigma : Float)
     Arbitrage if violated:
     - If log returns not normal: hedging ratios mismatch, arb via option spreads
 -/
-theorem lognormal_property (spot drift volatility time : Float)
+theorem lognormal_property (spot drift volatility time : ℝ)
     (hSpot : spot > 0)
     (hVol : volatility > 0)
     (hTime : time > 0) :
     -- E[S_T] = S_0 × e^(μT) (drift determines expected return)
-    let expected_spot := spot * Float.exp (drift * time)
+    let expected_spot := spot * Real.exp (drift * time)
     expected_spot > spot ∨ expected_spot ≤ spot := by
   by_cases h : drift ≥ 0
   · left
-    sorry
+    nlinarith [Real.exp_pos (drift * time)]
   · right
     push_neg at h
-    sorry
+    nlinarith [Real.exp_pos (drift * time)]
 
 -- ============================================================================
 -- Risk-Neutral Measure and Girsanov Theorem
@@ -116,12 +116,20 @@ theorem lognormal_property (spot drift volatility time : Float)
     Arbitrage if violated:
     - If option price ≠ discounted risk-neutral expectation: immediate arb
 -/
-theorem risk_neutral_valuation (option_price payoff discount_factor risk_free_rate time : Float)
+theorem risk_neutral_valuation (option_price payoff discount_factor risk_free_rate time : ℝ)
     (hPrice : option_price > 0)
     (hPayoff : payoff ≥ 0)
     (hDF : 0 < discount_factor ∧ discount_factor ≤ 1) :
     -- Option price = discounted expected payoff
-    option_price ≤ discount_factor * payoff + 0.01 := sorry
+    option_price ≤ discount_factor * payoff + 0.01 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := option_price - (discount_factor * payoff + 0.01)
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
 
 /-- Girsanov theorem: Market price of risk uniqueness.
 
@@ -134,10 +142,11 @@ theorem risk_neutral_valuation (option_price payoff discount_factor risk_free_ra
 
     Practical: Any asset's excess return / volatility = λ
 -/
-theorem market_price_of_risk_uniqueness (expected_return1 expected_return2 vol1 vol2 risk_free_rate : Float)
+theorem market_price_of_risk_uniqueness (expected_return1 expected_return2 vol1 vol2 risk_free_rate : ℝ)
     (hVol : vol1 > 0 ∧ vol2 > 0) :
     -- Market price of risk must be same for both
-    (expected_return1 - risk_free_rate) / vol1 = (expected_return2 - risk_free_rate) / vol2 := sorry
+    (expected_return1 - risk_free_rate) / vol1 = (expected_return2 - risk_free_rate) / vol2 := by
+  sorry
 
 -- ============================================================================
 -- Martingale Representation and Hedging
@@ -158,14 +167,15 @@ theorem market_price_of_risk_uniqueness (expected_return1 expected_return2 vol1 
 
     Practical: Self-financing portfolio replicating option.
 -/
-theorem martingale_representation_hedgeability (derivative_payoff drift volatility : Float)
+theorem martingale_representation_hedgeability (derivative_payoff drift volatility : ℝ)
     (hVol : volatility > 0) :
     -- Derivative payoff can be replicated via continuous trading
-    (∃ hedge_ratio : Float, hedge_ratio * volatility = derivative_payoff) ∨
-    (¬∃ perfect_hedge : Float, True) := by
+    (∃ hedge_ratio : ℝ, hedge_ratio * volatility = derivative_payoff) ∨
+    (¬∃ perfect_hedge : ℝ, True) := by
   left
   use derivative_payoff / volatility
   field_simp
+  ring
 
 /-- Delta hedging optimality: Delta-neutral portfolio earns risk-free rate.
 
@@ -180,12 +190,15 @@ theorem martingale_representation_hedgeability (derivative_payoff drift volatili
     - If Θ + (1/2)Γ(dS)² > r×Π on average: buy delta-hedge position
     - If Θ + (1/2)Γ(dS)² < r×Π on average: short delta-hedge position
 -/
-theorem delta_hedge_return_constraint (theta gamma realized_move risk_free_rate : Float)
+theorem delta_hedge_return_constraint (theta gamma realized_move risk_free_rate : ℝ)
     (hGamma : gamma ≥ 0) :
     -- Delta-hedged P&L = theta + (1/2) gamma × (move)²
     let pnl := theta + (gamma / 2) * realized_move * realized_move
     -- In no-arbitrage, expected pnl ≈ risk-free return
-    pnl ≤ risk_free_rate + 0.01 ∨ pnl ≥ risk_free_rate - 0.01 := sorry
+    pnl ≤ risk_free_rate + 0.01 ∨ pnl ≥ risk_free_rate - 0.01 := by
+  by_cases h : pnl ≤ risk_free_rate + 0.01
+  · left; exact h
+  · right; push_neg at h; nlinarith
 
 -- ============================================================================
 -- Quadratic Variation and Volatility
@@ -207,8 +220,7 @@ theorem quadratic_variation_of_brownian (time : Time)
     (hTime : time.val > 0) :
     -- [W, W]_t = t (QV of Brownian = time)
     let quadratic_variation := time
-    quadratic_variation = time := by
-  rfl
+    quadratic_variation = time := rfl
 
 /-- Realized volatility consistency: Realized vol from returns ≈ quadratic variation.
 
@@ -222,14 +234,14 @@ theorem quadratic_variation_of_brownian (time : Time)
     Arbitrage if violated:
     - If variance swap payoff ≠ realized variance: immediate arb
 -/
-theorem realized_volatility_equals_quadratic_variation (realized_vol_squared time : Float)
+theorem realized_volatility_equals_quadratic_variation (realized_vol_squared time : ℝ)
     (hTime : time > 0)
     (hVol : realized_vol_squared ≥ 0) :
     -- Realized variance matches quadratic variation
     realized_vol_squared * time ≥ 0 ∧ realized_vol_squared * time ≤ 1000 := by
   constructor
-  · sorry
-  · sorry
+  · nlinarith
+  · nlinarith [hTime, hVol]
 
 -- ============================================================================
 -- Jump Processes and Poisson Arrivals
@@ -250,7 +262,7 @@ theorem realized_volatility_equals_quadratic_variation (realized_vol_squared tim
 
     Practical: Credit events, earnings surprises, market dislocations
 -/
-theorem jump_diffusion_pricing (continuous_price jump_size jump_intensity : Float)
+theorem jump_diffusion_pricing (continuous_price jump_size jump_intensity : ℝ)
     (hIntensity : jump_intensity ≥ 0)
     (hPrice : continuous_price > 0) :
     -- Option on jump-diffusion process worth more than GBM only
@@ -258,7 +270,7 @@ theorem jump_diffusion_pricing (continuous_price jump_size jump_intensity : Floa
     let gbm_only := continuous_price
     let with_jumps := continuous_price + jump_intensity * (jump_size.abs / 100)
     with_jumps ≥ gbm_only := by
-  norm_num
+  nlinarith [hIntensity, abs_nonneg jump_size]
 
 -- ============================================================================
 -- Local Volatility vs Stochastic Volatility
@@ -276,11 +288,12 @@ theorem jump_diffusion_pricing (continuous_price jump_size jump_intensity : Floa
     Arbitrage if violated:
     - If local vol inconsistent with option prices: smile arbitrage
 -/
-theorem local_volatility_from_smile (implied_vol local_vol spot strike : Float)
+theorem local_volatility_from_smile (implied_vol local_vol spot strike : ℝ)
     (hImplied : implied_vol > 0)
     (hLocal : local_vol > 0) :
     -- Local vol ≤ implied vol (by Jensen's inequality)
-    local_vol ≤ implied_vol := sorry
+    local_vol ≤ implied_vol := by
+  sorry
 
 /-- Stochastic volatility impact: Volatility of volatility affects option prices.
 
@@ -293,10 +306,11 @@ theorem local_volatility_from_smile (implied_vol local_vol spot strike : Float)
 
     Practical: SABR model, Heston model incorporate vol-of-vol
 -/
-theorem stochastic_volatility_smile (vol_of_vol smile_skew : Float)
+theorem stochastic_volatility_smile (vol_of_vol smile_skew : ℝ)
     (hVolOfVol : vol_of_vol ≥ 0) :
     -- Higher vol-of-vol → steeper smile
-    smile_skew ≥ 0 := sorry
+    smile_skew ≥ 0 := by
+  sorry
 
 -- ============================================================================
 -- COMPUTATIONAL DETECTION FUNCTIONS (Standard 5)
