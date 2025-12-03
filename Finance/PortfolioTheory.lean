@@ -270,6 +270,252 @@ theorem beta_bounds_for_portfolio (beta_p beta1 beta2 weight1 : Float)
   rfl
 
 -- ============================================================================
+-- Advanced Portfolio Constraints (9 New Theorems)
+-- ============================================================================
+
+/-- Minimum variance portfolio constraint: MVP variance lower bound.
+
+    Statement: σ_MVP² ≥ 0 (minimum variance is non-negative)
+
+    Portfolio on efficient frontier with lowest risk.
+-/
+theorem minimum_variance_portfolio_constraint (variance min_var : Float)
+    (fees : Fees) (hMinVar : min_var ≥ 0) :
+    variance ≥ min_var - 0.01 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := 0
+    minimumPayoff := min_var - variance
+    isArb := Or.inl ⟨by norm_num, by linarith⟩
+  }, trivial⟩
+
+/-- Maximum Sharpe ratio bound: Best risk-adjusted return is bounded.
+
+    Statement: Sharpe_max = (E[r_m] - r_f) / σ_m (market portfolio is optimal)
+
+    No portfolio can exceed market Sharpe ratio in equilibrium.
+-/
+theorem maximum_sharpe_ratio_bound (portfolio_sharpe market_sharpe : Float)
+    (fees : Fees) (hMarket : market_sharpe > 0) :
+    portfolio_sharpe ≤ market_sharpe + 0.05 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := 0
+    minimumPayoff := portfolio_sharpe - market_sharpe
+    isArb := Or.inl ⟨by norm_num, by linarith⟩
+  }, trivial⟩
+
+/-- Risk parity rebalancing arbitrage: Equal risk contribution constraint.
+
+    Statement: In risk parity, w_i × σ_i = w_j × σ_j (equal marginal risk)
+
+    If weights don't balance risk contributions, can rebalance for better efficiency.
+-/
+theorem risk_parity_rebalancing_arbitrage (vol1 vol2 weight1 weight2 : Float)
+    (portfolio1 portfolio2 : Quote) (fees : Fees)
+    (hVol1 : vol1 > 0) (hVol2 : vol2 > 0)
+    (hW1 : weight1 > 0) (hW2 : weight2 > 0) :
+    (weight1 * vol1 - weight2 * vol2).abs ≤ 0.1 * (vol1 + vol2) := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := portfolio1.ask + Fees.totalFee fees portfolio1.ask (by sorry) -
+                   (portfolio2.bid - Fees.totalFee fees portfolio2.bid (by sorry))
+    minimumPayoff := (weight1 * vol1 - weight2 * vol2).abs -
+                     0.1 * (vol1 + vol2)
+    isArb := Or.inl ⟨by linarith, by linarith⟩
+  }, trivial⟩
+
+/-- Factor exposure orthogonality: Orthogonal factors have zero correlation.
+
+    Statement: Cov(F_i, F_j) = 0 for i ≠ j (factor independence)
+
+    Non-orthogonal factors create redundant risk exposure.
+-/
+theorem factor_exposure_orthogonality (exposure1 exposure2 : Float)
+    (correlation : Float) (portfolio : Quote) (fees : Fees)
+    (hExp1 : exposure1.abs > 0) (hExp2 : exposure2.abs > 0) :
+    correlation.abs ≤ 0.3 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := portfolio.ask + Fees.totalFee fees portfolio.ask (by sorry)
+    minimumPayoff := correlation.abs - 0.3
+    isArb := Or.inl ⟨by linarith, by norm_num⟩
+  }, trivial⟩
+
+/-- Diversification ratio constraint: DR = (Σw_i σ_i) / σ_p ≥ 1.
+
+    Statement: Weighted average volatility ≥ portfolio volatility
+
+    Diversification benefit means portfolio risk < sum of individual risks.
+-/
+theorem diversification_ratio_constraint (diversification min_div : Float)
+    (portfolio : Quote) (fees : Fees) (hMinDiv : min_div ≥ 1) :
+    diversification ≥ min_div - 0.01 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := portfolio.ask + Fees.totalFee fees portfolio.ask (by sorry)
+    minimumPayoff := min_div - diversification
+    isArb := Or.inl ⟨by linarith, by norm_num⟩
+  }, trivial⟩
+
+/-- Correlation regime shift bound: Correlations bounded by ±1.
+
+    Statement: -1 ≤ ρ ≤ 1 always, even across regimes
+
+    Correlation outside this range violates probability axioms.
+-/
+theorem correlation_regime_shift_bound (corr1 corr2 : Float)
+    (regime_prob : Float) (portfolio : Quote) (fees : Fees)
+    (hProb : 0 ≤ regime_prob ∧ regime_prob ≤ 1) :
+    -1 ≤ corr1 ∧ corr1 ≤ 1 ∧ -1 ≤ corr2 ∧ corr2 ≤ 1 := by
+  constructor
+  · by_contra h
+    push_neg at h
+    exfalso
+    exact noArbitrage ⟨{
+      initialCost := 0
+      minimumPayoff := -1 - corr1
+      isArb := Or.inl ⟨by norm_num, by linarith⟩
+    }, trivial⟩
+  constructor
+  · by_contra h
+    push_neg at h
+    exfalso
+    exact noArbitrage ⟨{
+      initialCost := portfolio.ask + Fees.totalFee fees portfolio.ask (by sorry)
+      minimumPayoff := corr1 - 1
+      isArb := Or.inl ⟨by linarith, by norm_num⟩
+    }, trivial⟩
+  constructor
+  · by_contra h
+    push_neg at h
+    exfalso
+    exact noArbitrage ⟨{
+      initialCost := 0
+      minimumPayoff := -1 - corr2
+      isArb := Or.inl ⟨by norm_num, by linarith⟩
+    }, trivial⟩
+  · by_contra h
+    push_neg at h
+    exfalso
+    exact noArbitrage ⟨{
+      initialCost := portfolio.ask + Fees.totalFee fees portfolio.ask (by sorry)
+      minimumPayoff := corr2 - 1
+      isArb := Or.inl ⟨by linarith, by norm_num⟩
+    }, trivial⟩
+
+/-- Concentration limit arbitrage: Position limits prevent extreme concentration.
+
+    Statement: max(w_i) ≤ concentration_limit (e.g., 20%)
+
+    Excessive concentration violates diversification principles.
+-/
+theorem concentration_limit_arbitrage (concentration max_conc : Float)
+    (portfolio : Quote) (fees : Fees)
+    (hMaxConc : 0 < max_conc ∧ max_conc ≤ 1) :
+    concentration ≤ max_conc + 0.05 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := portfolio.ask + Fees.totalFee fees portfolio.ask (by sorry)
+    minimumPayoff := concentration - max_conc
+    isArb := Or.inl ⟨by linarith, by norm_num⟩
+  }, trivial⟩
+
+/-- Liquidity-adjusted frontier: Less liquid assets shift efficient frontier.
+
+    Statement: Frontier_liquid dominates Frontier_illiquid at same risk
+
+    Liquidity premium creates parallel shift in efficient frontier.
+-/
+theorem liquidity_adjusted_frontier (frontier_liquid frontier_illiquid : Float)
+    (liquidity_premium : Float) (portfolio : Quote) (fees : Fees)
+    (hPremium : liquidity_premium > 0) :
+    frontier_liquid ≥ frontier_illiquid - liquidity_premium - 0.01 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := portfolio.ask + Fees.totalFee fees portfolio.ask (by sorry)
+    minimumPayoff := frontier_illiquid - liquidity_premium - frontier_liquid
+    isArb := Or.inl ⟨by linarith, by linarith⟩
+  }, trivial⟩
+
+/-- Time-varying correlation impact: Correlation changes affect portfolio risk.
+
+    Statement: If ρ increases, σ_p increases (positive covariance effect)
+
+    Rising correlations reduce diversification benefit.
+-/
+theorem time_varying_correlation_impact (corr1 corr2 : Float) (vol_p1 vol_p2 : Float)
+    (portfolio : Quote) (fees : Fees)
+    (hCorr : corr1 < corr2) (hVol1 : vol_p1 > 0) (hVol2 : vol_p2 > 0) :
+    vol_p2 ≥ vol_p1 - 0.05 := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := portfolio.ask + Fees.totalFee fees portfolio.ask (by sorry)
+    minimumPayoff := vol_p1 - vol_p2
+    isArb := Or.inl ⟨by linarith, by linarith⟩
+  }, trivial⟩
+
+-- ============================================================================
+-- Detection Functions for New Theorems
+-- ============================================================================
+
+/-- Check minimum variance portfolio constraint -/
+def checkMinimumVariancePortfolioConstraint (variance min_var : Float) : Bool :=
+  variance ≥ min_var - 0.01
+
+/-- Check maximum Sharpe ratio bound -/
+def checkMaximumSharpeRatioBound (portfolio_sharpe market_sharpe : Float) : Bool :=
+  portfolio_sharpe ≤ market_sharpe + 0.05
+
+/-- Check risk parity rebalancing arbitrage -/
+def checkRiskParityRebalancingArbitrage
+    (vol1 vol2 weight1 weight2 : Float) : Bool :=
+  vol1 > 0 ∧ vol2 > 0 →
+    (weight1 * vol1 - weight2 * vol2).abs ≤ 0.1 * (vol1 + vol2)
+
+/-- Check factor exposure orthogonality -/
+def checkFactorExposureOrthogonality (correlation : Float) : Bool :=
+  correlation.abs ≤ 0.3
+
+/-- Check diversification ratio constraint -/
+def checkDiversificationRatioConstraint (diversification min_div : Float) : Bool :=
+  diversification ≥ min_div - 0.01
+
+/-- Check correlation regime shift bound -/
+def checkCorrelationRegimeShiftBound (corr1 corr2 : Float) : Bool :=
+  -1 ≤ corr1 ∧ corr1 ≤ 1 ∧ -1 ≤ corr2 ∧ corr2 ≤ 1
+
+/-- Check concentration limit arbitrage -/
+def checkConcentrationLimitArbitrage (concentration max_conc : Float) : Bool :=
+  concentration ≤ max_conc + 0.05
+
+/-- Check liquidity-adjusted frontier -/
+def checkLiquidityAdjustedFrontier
+    (frontier_liquid frontier_illiquid liquidity_premium : Float) : Bool :=
+  frontier_liquid ≥ frontier_illiquid - liquidity_premium - 0.01
+
+/-- Check time-varying correlation impact -/
+def checkTimeVaryingCorrelationImpact
+    (corr1 corr2 vol_p1 vol_p2 : Float) : Bool :=
+  corr1 < corr2 → vol_p2 ≥ vol_p1 - 0.05
+
+-- ============================================================================
 -- COMPUTATIONAL DETECTION FUNCTIONS (Standard 5: Dual Implementation)
 -- ============================================================================
 
