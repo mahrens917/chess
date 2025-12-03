@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "solve": {
+      "command": "/Users/mahrens917/mcp/novita_wrapper.py",
+      "args": [],
+      "env": {
+        "NOVITA_BASE_URL": "https://api.novita.ai/openai",
+        "NOVITA_MCP_FRAMING": "auto",
+        "NOVITA_MCP_LOG": "/tmp/novita_mcp.log"
+      },
+      "disabled": false
+    }
+  }
+}

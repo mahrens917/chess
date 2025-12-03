@@ -95,6 +95,89 @@ All theorems must include these four elements to be production-ready:
 - Naming pattern: analytical proof in theorem module (e.g., `ArbitrageDetection.lean`), computational checker in parallel detection module (e.g., `*Detection.lean`)
 - Both implementations must evaluate the same constraint; the computational version is the executable surface
 
+## Architecture: ℝ for Theorems, Float for Computation
+
+This project uses a **dual-type architecture** to bridge formal verification and practical computation:
+
+### The Design Pattern
+
+**Problem**: IEEE 754 floating-point arithmetic is complex and non-associative. Formally verifying Float theorems requires extensive axiomatization that contradicts practical computation.
+
+**Solution**: Use **ℝ (Real numbers)** for all theorem proofs and **Float** for computational detection functions.
+
+### Type Organization
+
+```lean
+-- Finance/Core/Types.lean uses ℝ internally:
+structure PosReal where
+  val : ℝ        -- Theorem domain
+  pos : val > 0
+
+structure Quote where
+  bid : PosReal   -- Uses ℝ
+  ask : PosReal   -- Uses ℝ
+  valid : bid.val ≤ ask.val
+
+structure Fees where
+  fixed : ℝ       -- Theorem domain
+  proportional : ℝ -- Theorem domain
+
+structure Rate where
+  val : ℝ         -- Theorem domain
+
+structure Time where
+  val : ℝ         -- Theorem domain
+  nonneg : val ≥ 0
+```
+
+### Theorem vs Computational Separation
+
+**Analytical Theorems** (use ℝ):
+```lean
+theorem putcall_parity_with_fees
+    (call put stock bond : Quote)  -- Contain ℝ values
+    (rate : Rate)                  -- val : ℝ
+    (time : Time) :                -- val : ℝ
+    call.ask - put.bid - stock.ask + bond.bid ≤ threshold := by
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{...}, trivial⟩
+```
+
+**Computational Checkers** (convert ℝ → Float for practical evaluation):
+```lean
+def checkPutcallParity
+    (call put stock bond : Quote)  -- Input types still use ℝ
+    (fees : Fees) :
+    Bool :=
+  let call_cost := call.ask.val + Fees.totalFee fees call.ask.val  -- Extract ℝ values
+  -- Use ℝ arithmetic for constraint checking
+  call_cost - put.bid.val - stock.ask.val + bond.bid.val ≤ 0.01
+```
+
+### Why This Works
+
+1. **Theorems are provable**: ℝ has full associativity, commutativity, and field properties in Lean/mathlib
+2. **Computation is practical**: Constraints are written in terms that can be directly checked against real market data
+3. **Type safety is maintained**: `Quote`, `Rate`, `Time`, `Fees` structures ensure correct data threading
+4. **Conversion is explicit**: No hidden implicit coercions between ℝ and Float
+
+### Key Properties
+
+- **Discount factors**: Use `Real.exp` (defined in mathlib) instead of `Float.exp`
+- **Addition and multiplication**: All work naturally on ℝ with mathlib support
+- **Inequalities**: Linear constraints use `linarith`, nonlinear use `nlinarith`
+- **Fees**: Always computed as `quote.ask + Fees.totalFee fees quote.ask` for costs
+
+### Migration Path (Phase 1-5)
+
+1. **Phase 1** (Foundation): Update `Finance/Core/Types.lean` to use ℝ in all structures ✅
+2. **Phase 2** (Options): Convert option bounds theorems to use ℝ
+3. **Phase 3** (Monotonicity/Convexity): Linear inequality proofs on ℝ
+4. **Phase 4** (Complex Strategies): Multi-leg arbitrage theorems with ℝ
+5. **Phase 5** (Advanced): Interest rates, bonds, volatility with Real.exp
+
 ## Theorem Proof Pattern
 
 All theorems follow the universal no-arbitrage proof structure:

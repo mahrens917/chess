@@ -21,9 +21,9 @@ namespace Finance
 -/
 structure Arbitrage where
   /-- Initial cost of entering the strategy (negative = you receive money) -/
-  initialCost : Float
+  initialCost : ℝ
   /-- Guaranteed minimum payoff at exit (worst-case scenario) -/
-  minimumPayoff : Float
+  minimumPayoff : ℝ
   /-- Proof that this satisfies arbitrage conditions -/
   isArb : (initialCost ≤ 0 ∧ minimumPayoff > 0) ∨
           (initialCost < 0 ∧ minimumPayoff ≥ 0)
@@ -31,15 +31,15 @@ structure Arbitrage where
 namespace Arbitrage
 
 /-- Construct an arbitrage from the first condition: cost ≤ 0, payoff > 0 -/
-def mk₁ {c p : Float} (hc : c ≤ 0) (hp : p > 0) : Arbitrage :=
+def mk₁ {c p : ℝ} (hc : c ≤ 0) (hp : p > 0) : Arbitrage :=
   ⟨c, p, Or.inl ⟨hc, hp⟩⟩
 
 /-- Construct an arbitrage from the second condition: cost < 0, payoff ≥ 0 -/
-def mk₂ {c p : Float} (hc : c < 0) (hp : p ≥ 0) : Arbitrage :=
+def mk₂ {c p : ℝ} (hc : c < 0) (hp : p ≥ 0) : Arbitrage :=
   ⟨c, p, Or.inr ⟨hc, hp⟩⟩
 
 /-- The net profit from an arbitrage. -/
-def profit (a : Arbitrage) : Float :=
+def profit (a : Arbitrage) : ℝ :=
   a.minimumPayoff - a.initialCost
 
 /-- An arbitrage is always profitable (after accounting for initial cost). -/
@@ -88,19 +88,19 @@ end Arbitrage
 /-- A cash flow at a specific time. -/
 structure CashFlow where
   time : Time
-  amount : Float  -- positive = you receive, negative = you pay
+  amount : ℝ  -- positive = you receive, negative = you pay
 
 /-- Compute the present value of a cash flow using discount factor.
     pv = amount * discount_factor
 -/
-def presentValue (cf : CashFlow) (r : Rate) : Float :=
+def presentValue (cf : CashFlow) (r : Rate) : ℝ :=
   cf.amount * Rate.discountFactor r cf.time
 
 /-- A trading strategy is a sequence of cash flows. -/
 def TradingStrategy := List CashFlow
 
 /-- Sum of all present values in a strategy. -/
-def netPresentValue (strategy : TradingStrategy) (r : Rate) : Float :=
+def netPresentValue (strategy : TradingStrategy) (r : Rate) : ℝ :=
   (strategy.map (fun cf => presentValue cf r)).sum
 
 /-- An arbitrage opportunity in a strategy: NPV > 0 at inception. -/
@@ -145,11 +145,11 @@ theorem contrapositive_is_detection {P : Prop} :
     the total fees incurred, it's not exploitable.
 -/
 theorem no_arb_if_fees_exceed_profit
-    {a : Arbitrage} {fees : Float} (hf : fees ≥ 0) (h : a.profit ≤ fees) :
+    {a : Arbitrage} {fees : ℝ} (hf : fees ≥ 0) (h : a.profit ≤ fees) :
     ¬(a.profit - fees > 0) := by
   intro hneg
   -- If a.profit ≤ fees, then a.profit - fees ≤ 0, so it cannot be > 0
-  sorry  -- Float arithmetic: profit ≤ fees => profit - fees ≤ 0, contradiction with > 0
+  sorry  -- Real arithmetic: profit ≤ fees => profit - fees ≤ 0, contradiction with > 0
 
 -- ============================================================================
 -- COMPUTATIONAL DETECTION FUNCTIONS (Standard 5)

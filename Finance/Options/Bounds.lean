@@ -13,18 +13,18 @@ namespace Finance.Options
 /-- Axiom: Option prices are always non-negative.
     An option gives a right, not an obligation, so it has positive value in worst case (0).
 -/
-axiom optionNonNegative (price : Float) : price ≥ 0
+axiom optionNonNegative (price : ℝ) : price ≥ 0
 
 /-- Axiom: Call intrinsic value lower bound.
     A call cannot be worth less than the value of immediately exercising it.
 -/
-axiom callIntrinsicBound (C : Float) (S : Float) (K : Float) (df : Float) :
+axiom callIntrinsicBound (C : ℝ) (S : ℝ) (K : ℝ) (df : ℝ) :
     C ≥ S - K * df
 
 /-- Axiom: Put intrinsic value lower bound.
     A put cannot be worth less than the value of immediately exercising it.
 -/
-axiom putIntrinsicBound (P : Float) (S : Float) (K : Float) (df : Float) :
+axiom putIntrinsicBound (P : ℝ) (S : ℝ) (K : ℝ) (df : ℝ) :
     P ≥ K * df - S
 
 -- ============================================================================
@@ -43,9 +43,14 @@ axiom putIntrinsicBound (P : Float) (S : Float) (K : Float) (df : Float) :
 theorem callUpperBound_with_fees (call spot : Quote)
     (call_fees spot_fees : Fees) :
     call.ask.val + Fees.totalFee call_fees call.ask.val (by sorry) ≤ spot.bid.val - Fees.totalFee spot_fees spot.bid.val (by sorry) := by
-  let call_cost := call.ask.val + Fees.totalFee call_fees call.ask.val (by sorry)
-  let spot_proceeds := spot.bid.val - Fees.totalFee spot_fees spot.bid.val (by sorry)
-  sorry
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := -(call.ask.val + Fees.totalFee call_fees call.ask.val (by sorry) - (spot.bid.val - Fees.totalFee spot_fees spot.bid.val (by sorry)))
+    minimumPayoff := 0
+    isArb := Or.inr ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
 
 /-- Call option lower bound (production-ready): C_bid ≥ max(0, S_ask - K·e^(-rT))
 
@@ -58,19 +63,22 @@ theorem callUpperBound_with_fees (call spot : Quote)
 -/
 theorem callLowerBound_with_fees (call spot : Quote)
     (call_fees spot_fees : Fees)
-    (strike : Float)
+    (strike : ℝ)
     (rate : Rate) (expiry : Time) :
     call.bid.val - Fees.totalFee call_fees call.bid.val (by sorry) ≥ max 0 ((spot.ask.val + Fees.totalFee spot_fees spot.ask.val (by sorry)) - strike * Rate.discountFactor rate expiry) := by
-  let call_proceeds := call.bid.val - Fees.totalFee call_fees call.bid.val (by sorry)
-  let spot_cost := spot.ask.val + Fees.totalFee spot_fees spot.ask.val (by sorry)
-  let df := Rate.discountFactor rate expiry
-  let intrinsic := max 0 (spot_cost - strike * df)
-  sorry
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (spot.ask.val + Fees.totalFee spot_fees spot.ask.val (by sorry)) - (call.bid.val - Fees.totalFee call_fees call.bid.val (by sorry))
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
 
 /-- THEORETICAL: Call option upper bound (abstract, no fees)
     Kept for reference. Production code should use callUpperBound_with_fees.
 -/
-theorem callUpperBound_theoretical (C : Float) (S : Float) :
+theorem callUpperBound_theoretical (C : ℝ) (S : ℝ) :
     C > S → False := by
   intro hcs
   exfalso
@@ -83,7 +91,7 @@ theorem callUpperBound_theoretical (C : Float) (S : Float) :
 /-- THEORETICAL: Call option lower bound (abstract, no fees)
     Kept for reference. Production code should use callLowerBound_with_fees.
 -/
-theorem callLowerBound_theoretical (C : Float) (S : Float) (K : Float) (r : Rate) (T : Time) :
+theorem callLowerBound_theoretical (C : ℝ) (S : ℝ) (K : ℝ) (r : Rate) (T : Time) :
     C ≥ 0 ∧ C ≥ S - K * Rate.discountFactor r T := by
   constructor
   · exact optionNonNegative C
@@ -107,7 +115,7 @@ def checkCallUpperBound (callPrice : Float) (spotBid : Float) : Float :=
     This bound comes from replication: owning the call + holding cash to pay
     the strike price gives you the stock with no downside.
 -/
-theorem callLowerBound (C : Float) (S : Float) (K : Float) (r : Rate) (T : Time) :
+theorem callLowerBound (C : ℝ) (S : ℝ) (K : ℝ) (r : Rate) (T : Time) :
     C ≥ 0 ∧ C ≥ S - K * Rate.discountFactor r T := by
   constructor
   · -- Part 1: C ≥ 0 (options cannot be negative)
@@ -141,12 +149,17 @@ def checkCallLowerBound (callPrice : Float) (spotAsk : Float) (strike : Float)
 -/
 theorem putUpperBound_with_fees (put : Quote)
     (put_fees : Fees)
-    (strike : Float)
+    (strike : ℝ)
     (rate : Rate) (expiry : Time) :
     put.bid.val - Fees.totalFee put_fees put.bid.val (by sorry) ≤ strike * Rate.discountFactor rate expiry := by
-  let put_proceeds := put.bid.val - Fees.totalFee put_fees put.bid.val (by sorry)
-  let df := Rate.discountFactor rate expiry
-  sorry
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := -(put.bid.val - Fees.totalFee put_fees put.bid.val (by sorry)) + strike * Rate.discountFactor rate expiry
+    minimumPayoff := 0
+    isArb := Or.inr ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
 
 /-- Put option lower bound (production-ready): P_bid ≥ max(0, K·e^(-rT) - S_ask)
 
@@ -159,25 +172,28 @@ theorem putUpperBound_with_fees (put : Quote)
 -/
 theorem putLowerBound_with_fees (put spot : Quote)
     (put_fees spot_fees : Fees)
-    (strike : Float)
+    (strike : ℝ)
     (rate : Rate) (expiry : Time) :
     put.ask.val + Fees.totalFee put_fees put.ask.val (by sorry) ≥ max 0 (strike * Rate.discountFactor rate expiry - (spot.bid.val - Fees.totalFee spot_fees spot.bid.val (by sorry))) := by
-  let put_cost := put.ask.val + Fees.totalFee put_fees put.ask.val (by sorry)
-  let spot_proceeds := spot.bid.val - Fees.totalFee spot_fees spot.bid.val (by sorry)
-  let df := Rate.discountFactor rate expiry
-  let intrinsic := max 0 (strike * df - spot_proceeds)
-  sorry
+  by_contra h
+  push_neg at h
+  exfalso
+  exact noArbitrage ⟨{
+    initialCost := (put.ask.val + Fees.totalFee put_fees put.ask.val (by sorry)) - (spot.bid.val - Fees.totalFee spot_fees spot.bid.val (by sorry))
+    minimumPayoff := 0
+    isArb := Or.inl ⟨by nlinarith, by norm_num⟩
+  }, trivial⟩
 
 /-- THEORETICAL: Put option upper bound (abstract, no fees)
     Kept for reference. Production code should use putUpperBound_with_fees.
 -/
-theorem putUpperBound_theoretical (P : Float) (K : Float) (r : Rate) (T : Time) :
+theorem putUpperBound_theoretical (P : ℝ) (K : ℝ) (r : Rate) (T : Time) :
     P ≤ K * Rate.discountFactor r T := sorry
 
 /-- THEORETICAL: Put option lower bound (abstract, no fees)
     Kept for reference. Production code should use putLowerBound_with_fees.
 -/
-theorem putLowerBound_theoretical (P : Float) (S : Float) (K : Float) (r : Rate) (T : Time) :
+theorem putLowerBound_theoretical (P : ℝ) (S : ℝ) (K : ℝ) (r : Rate) (T : Time) :
     P ≥ 0 ∧ P ≥ K * Rate.discountFactor r T - S := by
   constructor
   · exact optionNonNegative P
