@@ -329,7 +329,7 @@ def detectPCPArbitrage
     let spot_fee := Fees.totalFee spotFees spot.bid.val (by sorry)
     let total_fees := call_fee + put_fee + spot_fee
     let capital := quotes.call.ask.val + spot.bid.val
-    let pct := if capital > 0 then 100.0 * long_profit / capital else 0
+    let pct : Float := if capital > 0 then (100 : Float) * (long_profit : Float) / (capital : Float) else 0
     some ⟨"long_synthetic", long_dev, total_fees, long_profit, pct⟩
   else if short_profit > 0 then
     let short_dev := checkShortSyntheticArbitrage call put quotes spot rate h
@@ -338,7 +338,7 @@ def detectPCPArbitrage
     let spot_fee := Fees.totalFee spotFees spot.ask.val (by sorry)
     let total_fees := call_fee + put_fee + spot_fee
     let capital := quotes.call.bid.val + spot.ask.val
-    let pct := if capital > 0 then 100.0 * short_profit / capital else 0
+    let pct : Float := if capital > 0 then (100 : Float) * (short_profit : Float) / (capital : Float) else 0
     some ⟨"short_synthetic", short_dev, total_fees, short_profit, pct⟩
   else
     none

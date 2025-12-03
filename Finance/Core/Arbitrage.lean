@@ -120,7 +120,7 @@ def strategyIsArbitrage (strategy : TradingStrategy) (r : Rate) : Prop :=
     and no transaction costs or information advantages, arbitrage cannot
     exist in equilibrium.
 -/
-axiom noArbitrage : ¬∃ (a : Arbitrage), True
+axiom noArbitrage : ¬∃ (_ : Arbitrage), True
 
 /-- Consequence of no-arbitrage: if a constraint is violated,
     no arbitrage can be formed under that violation.
@@ -133,7 +133,8 @@ theorem contrapositive_is_detection {P : Prop} :
     (¬P → ∃ a : Arbitrage, True) := by
   intro h hnp
   exfalso
-  exact noArbitrage ⟨⟨0, 0, Or.inl ⟨by norm_num, by norm_num⟩⟩, trivial⟩
+  have hp : P := h noArbitrage
+  exact hnp hp
 
 -- ============================================================================
 -- No-Arbitrage with Fees

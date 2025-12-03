@@ -40,12 +40,20 @@ def smul (c : ℝ) (r : PosReal) (hc : c > 0) : PosReal :=
 /-- Maximum of two positive reals. -/
 noncomputable def max (a b : PosReal) : PosReal :=
   let m := if a.val > b.val then a.val else b.val
-  ⟨m, by nlinarith [a.pos, b.pos]⟩
+  ⟨m, by
+    show (if a.val > b.val then a.val else b.val) > 0
+    split
+    · exact a.pos
+    · exact b.pos⟩
 
 /-- Minimum of two positive reals. -/
 noncomputable def min (a b : PosReal) : PosReal :=
   let m := if a.val < b.val then a.val else b.val
-  ⟨m, by nlinarith [a.pos, b.pos]⟩
+  ⟨m, by
+    show (if a.val < b.val then a.val else b.val) > 0
+    split
+    · exact a.pos
+    · exact b.pos⟩
 
 end PosReal
 
