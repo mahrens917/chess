@@ -19,3 +19,6 @@ import Finance.TermStructure
 import Finance.ConvertibleBonds
 import Finance.CryptoPerpetualsAndFunding
 import Finance.StablecoinDePeggingConstraints
+import Finance.DEXLiquidityAndAMM
+import Finance.WrappedTokensAndBridges
+import Finance.LendingProtocolArbitrage
