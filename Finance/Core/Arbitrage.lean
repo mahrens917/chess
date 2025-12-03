@@ -129,8 +129,8 @@ axiom noArbitrage : ¬∃ (_ : Arbitrage), True
     of a constraint, we've found an arbitrage.
 -/
 theorem contrapositive_is_detection {P : Prop} :
-    (¬(∃ a : Arbitrage, True) → P) →
-    (¬P → ∃ a : Arbitrage, True) := by
+    (¬(∃ _ : Arbitrage, True) → P) →
+    (¬P → ∃ _ : Arbitrage, True) := by
   intro h hnp
   exfalso
   have hp : P := h noArbitrage
