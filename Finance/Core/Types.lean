@@ -76,6 +76,12 @@ def mid (q : Quote) : Float := (q.bid.val + q.ask.val) / 2
 def tightness (q : Quote) : Float :=
   spread q / mid q
 
+/-- Extract bid price as Float (preferred over direct .bid.val access). -/
+def bidValue (q : Quote) : Float := q.bid.val
+
+/-- Extract ask price as Float (preferred over direct .ask.val access). -/
+def askValue (q : Quote) : Float := q.ask.val
+
 end Quote
 
 -- ============================================================================
@@ -138,6 +144,9 @@ def sixMonths : Time := ⟨0.5, by sorry⟩
 /-- Three months. -/
 def threeMonths : Time := ⟨0.25, by sorry⟩
 
+/-- Extract time value as Float (preferred over direct .val access). -/
+def toFloat (t : Time) : Float := t.val
+
 end Time
 
 -- ============================================================================
@@ -170,6 +179,9 @@ def discountFactor (r : Rate) (t : Time) : Float :=
 /-- Accumulation factor: e^(r*t) -/
 def accumulationFactor (r : Rate) (t : Time) : Float :=
   Float.exp (r.val * t.val)
+
+/-- Extract rate value as Float (preferred over direct .val access). -/
+def toFloat (r : Rate) : Float := r.val
 
 end Rate
 
