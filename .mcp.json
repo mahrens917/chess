@@ -1,14 +1,25 @@
 {
   "mcpServers": {
     "solve": {
+      "type": "stdio",
       "command": "/Users/mahrens917/mcp/novita_wrapper.py",
       "args": [],
       "env": {
+        "NOVITA_API_KEY": "sk_5Ulg6xPAkM7NF8Ur_xKeUC1EIz8Ji-yUcoCalWGxn58",
         "NOVITA_BASE_URL": "https://api.novita.ai/openai",
         "NOVITA_MCP_FRAMING": "auto",
         "NOVITA_MCP_LOG": "/tmp/novita_mcp.log"
-      },
-      "disabled": false
+      }
+    },
+    "stockfish": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["/Users/mahrens917/mcp/stockfish_mcp.py"],
+      "env": {
+        "STOCKFISH_MCP_FRAMING": "newline",
+        "STOCKFISH_CMD": "/usr/local/bin/stockfish",
+        "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+      }
     }
   }
 }

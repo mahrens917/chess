@@ -31,11 +31,6 @@ fi
 echo "Building Lean project (lake build)..."
 lake build
 
-echo "Running mathlib style lints (lint-style.lean)..."
-if ! lake env lean --run .lake/packages/mathlib/scripts/lint-style.lean; then
-  echo "lint-style failed (known Lean IR interpreter crash); skipping style lint." >&2
-fi
-
 echo "Running tests (lake test)..."
 lake test
 

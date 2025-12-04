@@ -1,20 +1,15 @@
 import Lake
 open Lake DSL
-open System
 
-package «finance» where
-  -- add package configuration options here
+package «chess» where
 
-lean_lib «Finance» where
+lean_lib «Chess» where
 
-lean_exe «demo» {
-  root := `Demo.Main
+lean_exe «chessDemo» {
+  root := `Chess.Demo
 }
 
 @[test_driver]
 lean_exe «test» {
-  root := `Test.Basic
+  root := `Test.Main
 }
-
-require mathlib from git
-  "https://github.com/leanprover-community/mathlib4" @ "master"
