@@ -14,6 +14,13 @@ def positionSnapshot (gs : GameState) : PositionSnapshot :=
     castlingRights := gs.castlingRights
     enPassantTarget := gs.enPassantTarget }
 
+def seedHistory (gs : GameState) : GameState :=
+  let snap := positionSnapshot gs
+  { gs with history := [snap] }
+
+def buildStartingState : GameState :=
+  seedHistory standardGameState
+
 def GameState.promotedPiece (_gs : GameState) (m : Move) : Piece :=
   match m.promotion with
   | some pt => { pieceType := pt, color := m.piece.color }
@@ -92,9 +99,35 @@ def GameState.movePiece (gs : GameState) (m : Move) : GameState :=
     fullMoveNumber := nextFull
     enPassantTarget := newEnPassant
     castlingRights := updatedCastling
-    history := gs.history ++ [positionSnapshot gs]
     result := nextResult
   }
+
+def simulateMove (gs : GameState) (m : Move) : GameState :=
+  { gs.movePiece m with history := gs.history }
+
+@[simp] theorem simulateMove_board (gs : GameState) (m : Move) :
+    (simulateMove gs m).board = (gs.movePiece m).board := rfl
+
+@[simp] theorem simulateMove_toMove (gs : GameState) (m : Move) :
+    (simulateMove gs m).toMove = (gs.movePiece m).toMove := rfl
+
+@[simp] theorem simulateMove_halfMoveClock (gs : GameState) (m : Move) :
+    (simulateMove gs m).halfMoveClock = (gs.movePiece m).halfMoveClock := rfl
+
+@[simp] theorem simulateMove_fullMoveNumber (gs : GameState) (m : Move) :
+    (simulateMove gs m).fullMoveNumber = (gs.movePiece m).fullMoveNumber := rfl
+
+@[simp] theorem simulateMove_enPassantTarget (gs : GameState) (m : Move) :
+    (simulateMove gs m).enPassantTarget = (gs.movePiece m).enPassantTarget := rfl
+
+@[simp] theorem simulateMove_castlingRights (gs : GameState) (m : Move) :
+    (simulateMove gs m).castlingRights = (gs.movePiece m).castlingRights := rfl
+
+@[simp] theorem simulateMove_result (gs : GameState) (m : Move) :
+    (simulateMove gs m).result = (gs.movePiece m).result := rfl
+
+@[simp] theorem simulateMove_history (gs : GameState) (m : Move) :
+    (simulateMove gs m).history = gs.history := rfl
 
 namespace Game
 

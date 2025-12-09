@@ -1,0 +1,136 @@
+-- Completion for slidingTargets_rook_geometry (line ~1540)
+theorem slidingTargets_rook_geometry (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (deltas : List (Int × Int))
+    (h_deltas : deltas = [(1, 0), (-1, 0), (0, 1), (0, -1)]) :
+    m ∈ slidingTargets gs src p deltas →
+    Movement.isRookMove m.fromSq m.toSq ∧ pathClear gs.board m.fromSq m.toSq := by
+  intro h_mem
+  have h_props := slidingTargets_spec gs src p deltas m h_mem
+  rw [h_props.2]
+  constructor
+  · -- Show isRookMove
+    unfold Movement.isRookMove Movement.fileDiff Movement.rankDiff
+    unfold slidingTargets at h_mem
+    subst h_deltas
+    simp only [List.foldr_cons, List.foldr_nil] at h_mem
+    by_cases h1 : m ∈ slidingTargets.walk gs.board p.color 7 1 0 7 []
+    · have h_geom := slidingTargets_walk_geometry gs src p 1 0 7 [] m h1 (by simp)
+      obtain ⟨offset, h_pos, _, h_file, h_rank⟩ := h_geom
+      constructor
+      · intro h_eq; simp only [← h_eq] at h_file h_rank
+        have : src.fileInt + 1 * offset = src.fileInt := by rw [← h_file, Square.fileInt, h_eq]
+        omega
+      · right; constructor; · simp [h_rank]; · simp [h_file]; omega
+    · by_cases h2 : m ∈ slidingTargets.walk gs.board p.color 7 (-1) 0 7
+          (slidingTargets.walk gs.board p.color 7 1 0 7 [])
+      · have h_geom := slidingTargets_walk_geometry gs src p (-1) 0 7 _ m h2 h1
+        obtain ⟨offset, h_pos, _, h_file, h_rank⟩ := h_geom
+        constructor
+        · intro h_eq; simp only [← h_eq] at h_file h_rank
+          have : src.fileInt + (-1) * offset = src.fileInt := by rw [← h_file, Square.fileInt, h_eq]
+          omega
+        · right; constructor; · simp [h_rank]; · simp [h_file]; omega
+      · by_cases h3 : m ∈ slidingTargets.walk gs.board p.color 7 0 1 7
+            (slidingTargets.walk gs.board p.color 7 (-1) 0 7
+              (slidingTargets.walk gs.board p.color 7 1 0 7 []))
+        · have h_geom := slidingTargets_walk_geometry gs src p 0 1 7 _ m h3 h2
+          obtain ⟨offset, h_pos, _, h_file, h_rank⟩ := h_geom
+          constructor
+          · intro h_eq; simp only [← h_eq] at h_file h_rank
+            have : src.rankInt + 1 * offset = src.rankInt := by rw [← h_rank, Square.rankInt, h_eq]
+            omega
+          · left; constructor; · simp [h_file]; · simp [h_rank]; omega
+        · have h_geom := slidingTargets_walk_geometry gs src p 0 (-1) 7 _ m h_mem h3
+          obtain ⟨offset, h_pos, _, h_file, h_rank⟩ := h_geom
+          constructor
+          · intro h_eq; simp only [← h_eq] at h_file h_rank
+            have : src.rankInt + (-1) * offset = src.rankInt := by rw [← h_rank, Square.rankInt, h_eq]
+            omega
+          · left; constructor; · simp [h_file]; · simp [h_rank]; omega
+  · -- pathClear: admitted for now, needs separate walk invariant lemma
+    sorry
+
+-- Completion for slidingTargets_bishop_geometry (line ~1553)
+theorem slidingTargets_bishop_geometry (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (deltas : List (Int × Int))
+    (h_deltas : deltas = [(1, 1), (-1, -1), (1, -1), (-1, 1)]) :
+    m ∈ slidingTargets gs src p deltas →
+    Movement.isDiagonal m.fromSq m.toSq ∧ pathClear gs.board m.fromSq m.toSq := by
+  intro h_mem
+  have h_props := slidingTargets_spec gs src p deltas m h_mem
+  rw [h_props.2]
+  constructor
+  · -- Show isDiagonal
+    unfold Movement.isDiagonal Movement.fileDiff Movement.rankDiff Movement.absInt
+    unfold slidingTargets at h_mem
+    subst h_deltas
+    simp only [List.foldr_cons, List.foldr_nil] at h_mem
+    by_cases h1 : m ∈ slidingTargets.walk gs.board p.color 7 1 1 7 []
+    · have h_geom := slidingTargets_walk_geometry gs src p 1 1 7 [] m h1 (by simp)
+      obtain ⟨offset, h_pos, _, h_file, h_rank⟩ := h_geom
+      constructor
+      · intro h_eq; simp only [← h_eq] at h_file h_rank
+        have : src.fileInt + 1 * offset = src.fileInt := by rw [← h_file, Square.fileInt, h_eq]
+        omega
+      · simp [h_file, h_rank]; omega
+    · by_cases h2 : m ∈ slidingTargets.walk gs.board p.color 7 (-1) (-1) 7
+          (slidingTargets.walk gs.board p.color 7 1 1 7 [])
+      · have h_geom := slidingTargets_walk_geometry gs src p (-1) (-1) 7 _ m h2 h1
+        obtain ⟨offset, h_pos, _, h_file, h_rank⟩ := h_geom
+        constructor
+        · intro h_eq; simp only [← h_eq] at h_file h_rank
+          have : src.fileInt + (-1) * offset = src.fileInt := by rw [← h_file, Square.fileInt, h_eq]
+          omega
+        · simp [h_file, h_rank]; omega
+      · by_cases h3 : m ∈ slidingTargets.walk gs.board p.color 7 1 (-1) 7
+            (slidingTargets.walk gs.board p.color 7 (-1) (-1) 7
+              (slidingTargets.walk gs.board p.color 7 1 1 7 []))
+        · have h_geom := slidingTargets_walk_geometry gs src p 1 (-1) 7 _ m h3 h2
+          obtain ⟨offset, h_pos, _, h_file, h_rank⟩ := h_geom
+          constructor
+          · intro h_eq; simp only [← h_eq] at h_file h_rank
+            have : src.fileInt + 1 * offset = src.fileInt := by rw [← h_file, Square.fileInt, h_eq]
+            omega
+          · simp [h_file, h_rank]; omega
+        · have h_geom := slidingTargets_walk_geometry gs src p (-1) 1 7 _ m h_mem h3
+          obtain ⟨offset, h_pos, _, h_file, h_rank⟩ := h_geom
+          constructor
+          · intro h_eq; simp only [← h_eq] at h_file h_rank
+            have : src.fileInt + (-1) * offset = src.fileInt := by rw [← h_file, Square.fileInt, h_eq]
+            omega
+          · simp [h_file, h_rank]; omega
+  · -- pathClear: admitted for now
+    sorry
+
+-- Completion for slidingTargets_queen_geometry (line ~1566)
+theorem slidingTargets_queen_geometry (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (deltas : List (Int × Int))
+    (h_deltas : deltas = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)]) :
+    m ∈ slidingTargets gs src p deltas →
+    Movement.isQueenMove m.fromSq m.toSq ∧ pathClear gs.board m.fromSq m.toSq := by
+  intro h_mem
+  have h_props := slidingTargets_spec gs src p deltas m h_mem
+  rw [h_props.2]
+  constructor
+  · -- Show isQueenMove = isRookMove ∨ isDiagonal
+    unfold Movement.isQueenMove
+    unfold slidingTargets at h_mem
+    subst h_deltas
+    simp only [List.foldr_cons, List.foldr_nil] at h_mem
+    -- First 4 walks are rook moves, last 4 are diagonal
+    by_cases h_rook : m ∈ slidingTargets.walk gs.board p.color 7 0 (-1) 7
+        (slidingTargets.walk gs.board p.color 7 0 1 7
+          (slidingTargets.walk gs.board p.color 7 (-1) 0 7
+            (slidingTargets.walk gs.board p.color 7 1 0 7 [])))
+    · -- It's from a rook direction
+      left
+      unfold Movement.isRookMove Movement.fileDiff Movement.rankDiff
+      -- Similar analysis as rook geometry
+      sorry
+    · -- It's from a diagonal direction
+      right
+      unfold Movement.isDiagonal Movement.fileDiff Movement.rankDiff Movement.absInt
+      -- Similar analysis as bishop geometry
+      sorry
+  · -- pathClear: admitted for now
+    sorry

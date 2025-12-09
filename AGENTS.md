@@ -34,3 +34,6 @@
 ## Agent Tips
 - The repository is Lean-centric, so lean on Lake commands for formatting and verification.
 - Use the existing `ci.sh` script for a reproducible workflow, but run it only when the `claude` CLI is configured and you intend to push automatically.
+
+## MCP Tooling
+- Treat the `solve` MCP server as the default assistant for grindy lemmas: capture the goal, call `solve`, paste the returned script, and cite it in comments when helpful. Using `solve` early saves tokens and keeps difficult subgoals moving forward even when local heuristics stall; note the assist in commit/PR text whenever it materially influenced a proof so reviewers can replay the MCP transcript if needed.

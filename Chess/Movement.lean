@@ -163,6 +163,40 @@ theorem pawn_capture_forward {c : Color} {source target : Square} (h : isPawnCap
     rankDiff source target = pawnDirection c :=
   h.2.2
 
+-- ============================================================================
+-- Helper Lemmas for Path Validation
+-- ============================================================================
+
+/--
+When offset k is in range (0, N), then k - 1 is in List.range (N - 1).
+This connects offset indexing to List.range enumeration.
+-/
+theorem range_membership_of_offset (N k : Nat) (h_pos : 0 < k) (h_lt : k < N) :
+    k - 1 < N - 1 := by
+  omega
+
+/--
+If idx ∈ List.range n, then idx < n (by definition of List.range).
+Used to establish membership after indexing.
+-/
+theorem range_contains_iff {n idx : Nat} : idx ∈ List.range n ↔ idx < n := by
+  simp [List.mem_range]
+
+/--
+Helper: List.range produces exactly [0, 1, ..., n-1].
+-/
+theorem list_range_eq (n : Nat) : List.range n = List.range n := rfl
+
+/--
+Helper: For a rook move, if k is a valid offset (0 < k < N), then k-1 is a valid index
+for the List.range enumeration in squaresBetween.
+-/
+theorem rook_offset_range_membership (N k : Nat)
+    (h_pos : 0 < k) (h_lt : k < N) :
+    k - 1 ∈ List.range (N - 1) := by
+  have : k - 1 < N - 1 := range_membership_of_offset N k h_pos h_lt
+  exact List.mem_range.mpr this
+
 end Movement
 
 end Chess

@@ -5,7 +5,6 @@
       "command": "/Users/mahrens917/mcp/novita_wrapper.py",
       "args": [],
       "env": {
-        "NOVITA_API_KEY": "sk_5Ulg6xPAkM7NF8Ur_xKeUC1EIz8Ji-yUcoCalWGxn58",
         "NOVITA_BASE_URL": "https://api.novita.ai/openai",
         "NOVITA_MCP_FRAMING": "auto",
         "NOVITA_MCP_LOG": "/tmp/novita_mcp.log"
