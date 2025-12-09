@@ -1073,25 +1073,66 @@ theorem pawnAdvance_squareFromInts (c : Color) (src tgt : Square)
       Movement.squareFromInts src.fileInt (src.rankInt + Movement.pawnDirection c) = some tgt) ∧
     (Movement.rankDiff src tgt = -2 * Movement.pawnDirection c →
       Movement.squareFromInts src.fileInt (src.rankInt + 2 * Movement.pawnDirection c) = some tgt) := by
+  -- From isPawnAdvance: tgt is in same file and 1 or 2 ranks forward
+  have h_file_eq := h_adv.2.1  -- fileDiff src tgt = 0, so src.fileInt = tgt.fileInt
   constructor
   · intro h_single
     -- For single-step advance: rankDiff = -pawnDirection
-    -- This means src.rankInt - tgt.rankInt = -pawnDirection
+    -- rankDiff src tgt = src.rankInt - tgt.rankInt = -pawnDirection
     -- So tgt.rankInt = src.rankInt + pawnDirection
-    sorry
+    unfold Movement.rankDiff at h_single
+    unfold Movement.fileDiff at h_file_eq
+    rw [show src.fileInt = tgt.fileInt by omega]
+    rw [show src.rankInt + Movement.pawnDirection c = tgt.rankInt by omega]
+    exact squareFromInts_roundTrip tgt
   · intro h_double
     -- For double-step advance: rankDiff = -2*pawnDirection
-    -- This means src.rankInt - tgt.rankInt = -2*pawnDirection
+    -- rankDiff src tgt = src.rankInt - tgt.rankInt = -2*pawnDirection
     -- So tgt.rankInt = src.rankInt + 2*pawnDirection
-    sorry
+    unfold Movement.rankDiff at h_double
+    unfold Movement.fileDiff at h_file_eq
+    rw [show src.fileInt = tgt.fileInt by omega]
+    rw [show src.rankInt + 2 * Movement.pawnDirection c = tgt.rankInt by omega]
+    exact squareFromInts_roundTrip tgt
 
 /--
 When isPawnCapture holds, squareFromInts with appropriate file offset produces the target square.
 -/
-axiom pawnCapture_squareFromInts (c : Color) (src tgt : Square)
+theorem pawnCapture_squareFromInts (c : Color) (src tgt : Square)
     (h_cap : Movement.isPawnCapture c src tgt) :
     ∃ df : Int, df ∈ [-1, 1] ∧
-      Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection c) = some tgt
+      Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection c) = some tgt := by
+  -- From isPawnCapture: tgt is exactly 1 file away and 1 rank forward
+  have h_fileDiff := h_cap.2.1  -- absInt (fileDiff src tgt) = 1
+  have h_rankDiff := h_cap.2.2  -- rankDiff src tgt = pawnDirection c
+  -- fileDiff src tgt = src.fileInt - tgt.fileInt, so absInt(src.fileInt - tgt.fileInt) = 1
+  -- This means either src.fileInt - tgt.fileInt = 1 or src.fileInt - tgt.fileInt = -1
+  -- Case 1: src.fileInt - tgt.fileInt = 1 → tgt.fileInt = src.fileInt - 1 → df = -1
+  -- Case 2: src.fileInt - tgt.fileInt = -1 → tgt.fileInt = src.fileInt + 1 → df = 1
+  by_cases h : Movement.fileDiff src tgt = 1
+  · -- Case: src.fileInt - tgt.fileInt = 1, so df = -1
+    use -1
+    constructor
+    · norm_num
+    · -- squareFromInts (src.fileInt + (-1)) (src.rankInt + pawnDirection c) = some tgt
+      -- = squareFromInts (src.fileInt - 1) (src.rankInt + pawnDirection c) = some tgt
+      -- Since tgt.fileInt = src.fileInt - 1 and tgt.rankInt = src.rankInt + pawnDirection c
+      unfold Movement.fileDiff at h
+      rw [show src.rankInt + Movement.pawnDirection c = tgt.rankInt by omega]
+      rw [show src.fileInt - 1 = tgt.fileInt by omega]
+      exact squareFromInts_roundTrip tgt
+  · -- Case: src.fileInt - tgt.fileInt ≠ 1, but absInt(...) = 1, so src.fileInt - tgt.fileInt = -1
+    use 1
+    constructor
+    · norm_num
+    · unfold Movement.fileDiff at h_fileDiff h
+      unfold Movement.absInt at h_fileDiff
+      -- absInt(src.fileInt - tgt.fileInt) = 1
+      -- Since src.fileInt - tgt.fileInt ≠ 1 and abs(...) = 1, we have src.fileInt - tgt.fileInt = -1
+      have h_rank_eq : src.rankInt + Movement.pawnDirection c = tgt.rankInt := by omega
+      have h_file_eq : src.fileInt + 1 = tgt.fileInt := by omega
+      rw [h_rank_eq, h_file_eq]
+      exact squareFromInts_roundTrip tgt
 
 /--
 For a single-step pawn advance with pathClear, the target is empty.
@@ -1178,6 +1219,11 @@ theorem enPassant_not_promo_rank (c : Color) (src tgt : Square)
 /--
 Axiom: Given the pawn advance and squareFromInts conditions, the move is in forwardMoves.
 This bridges the computed squareFromInts results to the list membership.
+
+Note: This axiom requires understanding the nested pattern matching and foldr semantics,
+combined with the non-trivial property that pathClear guarantees target square emptiness
+for non-capture moves. Rather than prove this via heavy case analysis, we accept it as
+an axiom capturing the intended move generation behavior.
 -/
 axiom pawnAdvance_in_forwardMoves (gs : GameState) (m : Move)
     (h_pawn : m.piece.pieceType = PieceType.Pawn)
