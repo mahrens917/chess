@@ -530,13 +530,41 @@ theorem fideLegal_king_noCastle_in_pieceTargets (gs : GameState) (m : Move)
 -- ============================================================================
 
 /--
-Foundational axiom: The coordinate round-trip property for the Square type.
-This is a system boundary property (internal representation) similar to how
-Lean axiomatizes Int arithmetic. Validated by construction (all squares are created
-via squareFromInts or Square.all), ensuring the invariant is preserved.
+Theorem: The coordinate round-trip property for the Square type.
+Since Square's file and rank are Fin 8 (bounded 0-8), extracting their Int values
+and reconstructing via squareFromInts always succeeds and returns the same square.
+
+Proof strategy:
+1. Unfold squareFromInts definition
+2. Verify bounds check: fileInt and rankInt are guaranteed < 8 by Fin 8 bounds
+3. Show mkUnsafe reconstructs the original square
 -/
-axiom squareFromInts_roundTrip (sq : Square) :
-    Movement.squareFromInts sq.fileInt sq.rankInt = some sq
+theorem squareFromInts_roundTrip (sq : Square) :
+    Movement.squareFromInts sq.fileInt sq.rankInt = some sq := by
+  -- Unfold squareFromInts
+  unfold Movement.squareFromInts
+  -- Check bounds and simplify
+  have h_file_bounds : 0 ≤ sq.fileInt ∧ sq.fileInt < 8 := by
+    simp only [Square.fileInt]
+    constructor
+    · exact Int.ofNat_nonneg _
+    · exact sq.file.isLt
+  have h_rank_bounds : 0 ≤ sq.rankInt ∧ sq.rankInt < 8 := by
+    simp only [Square.rankInt]
+    constructor
+    · exact Int.ofNat_nonneg _
+    · exact sq.rank.isLt
+  simp only [h_file_bounds.1, h_file_bounds.2, h_rank_bounds.1, h_rank_bounds.2, ↓reduceIte]
+  -- Now the bounds check passes and we have Square.mkUnsafe
+  -- We need to show it equals sq
+  congr 1
+  ext
+  · -- Show file matches
+    simp only [Square.mkUnsafe, Int.toNat_ofNat]
+    exact rfl
+  · -- Show rank matches
+    simp only [Square.mkUnsafe, Int.toNat_ofNat]
+    exact rfl
 
 -- ============================================================================
 -- Sliding Piece Completeness
