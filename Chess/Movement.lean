@@ -86,6 +86,25 @@ def squareFromInts (f r : Int) : Option Square :=
   else
     none
 
+def rookDelta (src tgt : Square) : Int × Int :=
+  let fd := fileDiff src tgt
+  let rd := rankDiff src tgt
+  if fd = 0 then
+    (0, signInt (-rd))
+  else
+    (signInt (-fd), 0)
+
+def rookOffset (src tgt : Square) : Nat :=
+  (fileDiff src tgt).natAbs + (rankDiff src tgt).natAbs
+
+def bishopDelta (src tgt : Square) : Int × Int :=
+  let fd := fileDiff src tgt
+  let rd := rankDiff src tgt
+  (signInt (-fd), signInt (-rd))
+
+def bishopOffset (src tgt : Square) : Nat :=
+  (fileDiff src tgt).natAbs
+
 def squaresBetween (source target : Square) : List Square :=
   if isDiagonal source target then
     let fd := fileDiff source target
