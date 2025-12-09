@@ -117,6 +117,14 @@ theorem enPassantTarget_rank_constraint (gs : GameState) (target : Square) :
   -- In that case, it's set to the intermediate square
   -- For white pawns starting at rank 1 (rankInt=1), intermediate is at rankInt=2 (rankNat=2)
   -- For black pawns starting at rank 6 (rankInt=6), intermediate is at rankInt=5 (rankNat=5)
+  intro h_ep
+  -- gs.enPassantTarget can only be set by movePiece when a pawn moves two-step.
+  -- But without access to the game history, we can only reason about the possible values.
+  -- If enPassantTarget = some target, then either:
+  -- 1. It was set by a prior pawn two-step to intermediate rank 2 or 5
+  -- 2. The invariant is broken (contradiction with our system design)
+  -- This theorem follows from the structural guarantee that movePiece only sets enPassantTarget
+  -- to rank 2 (white) or rank 5 (black) intermediate squares.
   sorry
 
 /--
@@ -313,6 +321,15 @@ lemma pawn_two_step_intermediate_not_modified (fromSq toSq intermediate : Square
     · intro _; omega
     · intro _; omega
 
+-- Lemma: board.get is preserved at a square when updating different squares
+lemma board_get_preserved_after_updates (b : Board) (sq1 sq2 sq3 target : Square) (p1 p2 p3 : Option Piece)
+    (h1 : target ≠ sq1) (h2 : target ≠ sq2) (h3 : target ≠ sq3) :
+    ((b.update sq1 p1).update sq2 p2).update sq3 p3 |>.get target =
+    b.get target := by
+  simp only [EnPassantInvariant.board_update_ne_unchanged b sq1 target p1 h1]
+  simp only [EnPassantInvariant.board_update_ne_unchanged (b.update sq1 p1) sq2 target p2 h2]
+  simp only [EnPassantInvariant.board_update_ne_unchanged ((b.update sq1 p1).update sq2 p2) sq3 target p3 h3]
+
 -- Key lemma: if gs is valid and a pawn moves two-step, the resulting state is valid
 -- This lemma captures the core invariant: the intermediate square of a pawn two-step
 -- is never modified by the move, so it remains empty as established by the prior state.
@@ -356,6 +373,19 @@ lemma enPassantTarget_valid_after_pawn_two_step (gs : GameState) (m : Move)
     --   gs.enPassantTarget = none (only other moves set it, and they set it to their own intermediate)
     -- By base case or prior moves: gs.board.get target = none
     -- Therefore: isEmpty (gs.movePiece m).board target = true
+
+    -- The key insight: the pawn intermediate square is distinct from:
+    -- - m.fromSq (source), m.toSq (destination)
+    -- - enPassant capture square (if applicable)
+    -- - castle rook squares (if applicable)
+    --
+    -- Since target is distinct from all modification points,
+    -- and board operations preserve values at non-modified squares,
+    -- we have (gs.movePiece m).board.get target = gs.board.get target
+
+    -- By the validity of gs and the fact that gs.enPassantTarget was none
+    -- (or if it was some, it pointed to a different intermediate square),
+    -- we know gs.board.get target = none
 
     sorry
   · -- h_rank_check is false, so enPassantTarget is set to none
