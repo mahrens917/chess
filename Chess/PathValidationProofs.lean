@@ -452,24 +452,42 @@ theorem bishopRay_intermediate_in_squaresBetween (src tgt : Square) (h : Movemen
 -- ============================================================================
 
 /--
-Helper axiom: If a move is in the first element of a list and promotionMoves
-returns a list containing that move, then the move is in the foldr result.
-
-This captures: m ∈ promotionMoves mv → m ∈ (foldr ... [mv])
+Theorem: If a move is in promotionMoves, it's in the foldr result for a single-element list.
+When folding [mv] with promotionMoves ++ accumulator:
+- foldr starts with acc = []
+- foldr processes mv: computes promotionMoves mv ++ [] = promotionMoves mv
+- Therefore any m ∈ promotionMoves mv is in the result
 -/
-axiom pawn_move_in_foldr_head (m mv : Move) :
+theorem pawn_move_in_foldr_head (m mv : Move) :
     m ∈ promotionMoves mv →
-    m ∈ [mv].foldr (fun mv' acc => promotionMoves mv' ++ acc) []
+    m ∈ [mv].foldr (fun mv' acc => promotionMoves mv' ++ acc) [] := by
+  intro h_in_promo
+  -- Unfold the foldr: [mv].foldr f [] = f mv []
+  simp only [List.foldr]
+  -- After foldr, we have promotionMoves mv ++ []
+  simp only [List.append_nil]
+  exact h_in_promo
 
 /--
-Helper axiom: If a move is in the foldr result of a list tail, it remains
-in the foldr result after prepending a new head element.
+Theorem: If a move is in the foldr result of a list tail, it's in the foldr
+result after prepending a new head element.
 
-This captures foldr associativity for the promotionMoves pattern.
+Foldr associativity: (mv :: tail).foldr f acc computes:
+  f mv (tail.foldr f acc)
+So any element in tail.foldr f acc is also in (mv :: tail).foldr f acc
+via the append operation in the recursive step.
 -/
-axiom pawn_move_in_foldr_tail (m mv : Move) (tail : List Move) :
+theorem pawn_move_in_foldr_tail (m mv : Move) (tail : List Move) :
     m ∈ tail.foldr (fun mv' acc => promotionMoves mv' ++ acc) [] →
-    m ∈ (mv :: tail).foldr (fun mv' acc => promotionMoves mv' ++ acc) []
+    m ∈ (mv :: tail).foldr (fun mv' acc => promotionMoves mv' ++ acc) [] := by
+  intro h_in_tail
+  -- Unfold (mv :: tail).foldr
+  simp only [List.foldr]
+  -- This computes to: promotionMoves mv ++ (tail.foldr ...)
+  -- m is in the tail part, so it's in the append
+  simp only [List.mem_append]
+  right
+  exact h_in_tail
 
 end Rules
 
