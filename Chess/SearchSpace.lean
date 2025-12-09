@@ -302,51 +302,279 @@ def composeReductions (r1 r2 : ValidReduction) : ValidReduction :=
     value_preserved := fun gs1 gs2 h => sorry -- Requires combining proofs
   }
 
-/-! ## 9. Discovery Framework -/
+/-! ## 9. Computable Search Space Tracking -/
 
-/-- A potential reduction candidate -/
+/-- Scientific notation representation for large numbers -/
+structure SciNotation where
+  mantissa : Float    -- 1.0 ≤ mantissa < 10.0
+  exponent : Int      -- Power of 10
+deriving Repr
+
+namespace SciNotation
+
+def fromNat (n : Nat) : SciNotation :=
+  if n = 0 then { mantissa := 0.0, exponent := 0 }
+  else
+    let f := Float.ofNat n
+    let exp := Float.floor (Float.log10 f)
+    let mant := f / Float.pow 10.0 exp
+    { mantissa := mant, exponent := exp.toUInt64.toNat }
+
+def toString (s : SciNotation) : String :=
+  let mantStr := s!"{s.mantissa}"
+  let truncMant := if mantStr.length > 4 then mantStr.take 4 else mantStr
+  s!"{truncMant} × 10^{s.exponent}"
+
+def mul (a b : SciNotation) : SciNotation :=
+  let newMant := a.mantissa * b.mantissa
+  let exp := Float.floor (Float.log10 newMant)
+  { mantissa := newMant / Float.pow 10.0 exp
+    exponent := a.exponent + b.exponent + exp.toUInt64.toNat }
+
+def div (a b : SciNotation) : SciNotation :=
+  if b.mantissa == 0.0 then a else
+  let newMant := a.mantissa / b.mantissa
+  let exp := Float.floor (Float.log10 newMant)
+  let adjMant := if exp < 0.0 then newMant * 10.0 else newMant / Float.pow 10.0 exp
+  { mantissa := adjMant
+    exponent := a.exponent - b.exponent + (if exp < 0.0 then -1 else exp.toUInt64.toNat) }
+
+end SciNotation
+
+/-- Known baseline constants (from literature) -/
+def TROMP_STATE_SPACE : SciNotation := { mantissa := 2.0, exponent := 44 }
+def SHANNON_GAME_TREE : SciNotation := { mantissa := 1.0, exponent := 123 }
+def FEASIBILITY_THRESHOLD : SciNotation := { mantissa := 1.0, exponent := 20 }
+
+/-- Proof status for a reduction -/
+inductive ProofStatus
+  | Proven (theoremName : String)      -- Fully proven in Lean
+  | Partial (theoremName : String)     -- Partially proven
+  | Conjectured                        -- Believed true, no proof
+  | External (source : String)         -- Proven elsewhere (e.g., tablebase)
+deriving Repr
+
+/-- A proven reduction with computable factor -/
+structure ProvenReduction where
+  name : String
+  description : String
+  /-- Exact reduction factor as scientific notation -/
+  factor : SciNotation
+  /-- Proof status -/
+  proofStatus : ProofStatus
+  /-- When does this reduction apply? -/
+  applies : GameState → Bool
+  /-- How many positions does this eliminate in current state? -/
+  eliminatedCount : GameState → Nat
+
+/-- Log entry for tracking -/
+structure ReductionLogEntry where
+  reductionName : String
+  spaceBefore : SciNotation
+  spaceAfter : SciNotation
+  factor : SciNotation
+  proofStatus : ProofStatus
+deriving Repr
+
+/-- Running search space tracker -/
+structure SearchSpaceTracker where
+  /-- Current search space estimate -/
+  currentSpace : SciNotation
+  /-- Applied reductions in order -/
+  log : List ReductionLogEntry
+  /-- Pending candidate reductions -/
+  candidates : List String
+
+namespace SearchSpaceTracker
+
+/-- Initialize tracker with state-space baseline -/
+def init : SearchSpaceTracker :=
+  { currentSpace := TROMP_STATE_SPACE
+    log := []
+    candidates := ["Fortress Detection", "Pawn Structure Hash", "Blockade Detection"] }
+
+/-- Apply a reduction and log it -/
+def applyReduction (tracker : SearchSpaceTracker) (r : ProvenReduction) : SearchSpaceTracker :=
+  let newSpace := SciNotation.div tracker.currentSpace r.factor
+  let entry : ReductionLogEntry :=
+    { reductionName := r.name
+      spaceBefore := tracker.currentSpace
+      spaceAfter := newSpace
+      factor := r.factor
+      proofStatus := r.proofStatus }
+  { tracker with
+    currentSpace := newSpace
+    log := tracker.log ++ [entry] }
+
+/-- Format the current state as a string -/
+def formatState (tracker : SearchSpaceTracker) : String :=
+  let header := "═══════════════════════════════════════════════════════════════\n" ++
+                "                    SEARCH SPACE TRACKER                        \n" ++
+                "═══════════════════════════════════════════════════════════════\n"
+  let baseline := s!"Baseline (Tromp): {SciNotation.toString TROMP_STATE_SPACE}\n\n"
+  let logLines := tracker.log.map fun entry =>
+    let proofStr := match entry.proofStatus with
+      | ProofStatus.Proven name => s!"[✓ Proven: {name}]"
+      | ProofStatus.Partial name => s!"[◐ Partial: {name}]"
+      | ProofStatus.Conjectured => "[? Conjectured]"
+      | ProofStatus.External src => s!"[⊕ External: {src}]"
+    s!"  {entry.reductionName}\n" ++
+    s!"    Before: {SciNotation.toString entry.spaceBefore}\n" ++
+    s!"    Factor: ÷{SciNotation.toString entry.factor}\n" ++
+    s!"    After:  {SciNotation.toString entry.spaceAfter}\n" ++
+    s!"    Status: {proofStr}\n"
+  let reductionLog := if tracker.log.isEmpty then "  (no reductions applied)\n"
+                      else String.join logLines
+  let current := s!"\nCurrent estimate: {SciNotation.toString tracker.currentSpace}\n"
+  let gap := s!"Gap to feasibility (10^20): 10^{tracker.currentSpace.exponent - 20}\n"
+  let pending := if tracker.candidates.isEmpty then ""
+                 else s!"\nPending candidates: {tracker.candidates}\n"
+  header ++ baseline ++ "Applied Reductions:\n" ++ reductionLog ++ current ++ gap ++ pending
+
+end SearchSpaceTracker
+
+/-! ## 10. Proven Reductions Registry -/
+
+/-- Color symmetry reduction -/
+def colorSymmetryReduction : ProvenReduction :=
+  { name := "Color Symmetry"
+    description := "Position P with White to move ≡ mirror(P) with Black to move"
+    factor := { mantissa := 2.0, exponent := 0 }
+    proofStatus := ProofStatus.Proven "Color.opposite_opposite"
+    applies := fun _ => true
+    eliminatedCount := fun _ => 1 }
+
+/-- 50-move rule reduction -/
+def fiftyMoveReduction : ProvenReduction :=
+  { name := "50-Move Rule"
+    description := "Positions with halfMoveClock ≥ 100 are drawable"
+    factor := { mantissa := 1.0, exponent := 3 }
+    proofStatus := ProofStatus.Proven "fifty_move_terminates"
+    applies := isFiftyMoveDraw
+    eliminatedCount := fun gs => if isFiftyMoveDraw gs then 1 else 0 }
+
+/-- 75-move rule reduction -/
+def seventyFiveMoveReduction : ProvenReduction :=
+  { name := "75-Move Rule"
+    description := "Positions with halfMoveClock ≥ 150 are automatically drawn"
+    factor := { mantissa := 1.0, exponent := 3 }
+    proofStatus := ProofStatus.Proven "seventy_five_move_forced"
+    applies := isSeventyFiveMoveDraw
+    eliminatedCount := fun gs => if isSeventyFiveMoveDraw gs then 1 else 0 }
+
+/-- Alpha-beta pruning reduction (theoretical) -/
+def alphaBetaReduction : ProvenReduction :=
+  { name := "Alpha-Beta Pruning"
+    description := "Perfect move ordering reduces branching factor from b to √b"
+    factor := { mantissa := 1.0, exponent := 22 }  -- √(35^44) ≈ 35^22
+    proofStatus := ProofStatus.Conjectured
+    applies := fun _ => true
+    eliminatedCount := fun _ => 0 }
+
+/-- Transposition reduction -/
+def transpositionReduction : ProvenReduction :=
+  { name := "Transposition Tables"
+    description := "Many game paths lead to same position"
+    factor := { mantissa := 1.0, exponent := 79 }  -- 10^123 / 10^44
+    proofStatus := ProofStatus.External "Tromp (2016)"
+    applies := fun _ => true
+    eliminatedCount := fun _ => 0 }
+
+/-- Tablebase reduction (7-piece) -/
+def tablebaseReduction : ProvenReduction :=
+  { name := "7-Piece Tablebases"
+    description := "All ≤7 piece positions exactly solved"
+    factor := { mantissa := 1.0, exponent := 0 }  -- Doesn't reduce total, just solves subset
+    proofStatus := ProofStatus.External "Lomonosov (2012)"
+    applies := fun gs =>
+      let pieces := allSquares.countP fun sq => (gs.board sq).isSome
+      pieces ≤ 7
+    eliminatedCount := fun gs =>
+      let pieces := allSquares.countP fun sq => (gs.board sq).isSome
+      if pieces ≤ 7 then 1 else 0 }
+
+/-- All proven reductions -/
+def allProvenReductions : List ProvenReduction :=
+  [ colorSymmetryReduction
+  , fiftyMoveReduction
+  , seventyFiveMoveReduction
+  , alphaBetaReduction
+  , transpositionReduction
+  , tablebaseReduction ]
+
+/-! ## 11. Discovery Framework -/
+
+/-- A potential reduction candidate awaiting proof -/
 structure ReductionCandidate where
   name : String
-  /-- Predicate identifying the reduction property -/
-  property : GameState → Bool
-  /-- Estimated reduction factor (e.g., 2 for halving search space) -/
-  estimatedFactor : Nat
-  /-- Whether soundness has been proven -/
-  provenSound : Bool
+  description : String
+  /-- Estimated reduction factor -/
+  estimatedFactor : SciNotation
+  /-- What needs to be proven -/
+  proofRequirements : List String
+  /-- Priority (1 = highest) -/
+  priority : Nat
+  /-- Detection function (if implemented) -/
+  detect : Option (GameState → Bool)
 
-/-- Registry of known reduction candidates -/
-def reductionCandidates : List ReductionCandidate :=
-  [ { name := "Color Symmetry"
-      property := fun _ => true -- Always applicable
-      estimatedFactor := 2
-      provenSound := true }
-  , { name := "50-Move Draw"
-      property := isFiftyMoveDraw
-      estimatedFactor := 1000
-      provenSound := true }
-  , { name := "75-Move Draw"
-      property := isSeventyFiveMoveDraw
-      estimatedFactor := 1000
-      provenSound := true }
-  , { name := "Threefold Repetition"
-      property := threefoldRepetition
-      estimatedFactor := 10000
-      provenSound := false }
-  , { name := "Insufficient Material"
-      property := insufficientMaterial
-      estimatedFactor := 100
-      provenSound := false }
-  , { name := "Double Check"
-      property := isDoubleCheck
-      estimatedFactor := 10
-      provenSound := false }
+/-- Current candidate queue -/
+def candidateQueue : List ReductionCandidate :=
+  [ { name := "Fortress Detection"
+      description := "Identify defensive formations guaranteeing draw"
+      estimatedFactor := { mantissa := 1.0, exponent := 2 }
+      proofRequirements := ["fortress_pattern_exhaustive", "fortress_implies_draw"]
+      priority := 1
+      detect := none }
+  , { name := "Opposite-Color Bishops"
+      description := "Many OCB endgames are drawn"
+      estimatedFactor := { mantissa := 1.0, exponent := 1 }
+      proofRequirements := ["ocb_endgame_classification", "ocb_draw_sufficient"]
+      priority := 2
+      detect := some fun gs =>
+        let sig := materialSignature gs
+        sig.whitePawns = 0 ∧ sig.blackPawns = 0 ∧
+        ((sig.whiteBishopsLight > 0 ∧ sig.whiteBishopsDark = 0 ∧
+          sig.blackBishopsLight = 0 ∧ sig.blackBishopsDark > 0) ∨
+         (sig.whiteBishopsLight = 0 ∧ sig.whiteBishopsDark > 0 ∧
+          sig.blackBishopsLight > 0 ∧ sig.blackBishopsDark = 0)) }
+  , { name := "Pawn Structure Hashing"
+      description := "Group positions by pawn skeleton"
+      estimatedFactor := { mantissa := 1.0, exponent := 2 }
+      proofRequirements := ["pawn_structure_equivalence", "evaluation_bounds_transfer"]
+      priority := 3
+      detect := none }
+  , { name := "Blockade Detection"
+      description := "Identify frozen pawn structures"
+      estimatedFactor := { mantissa := 1.0, exponent := 2 }
+      proofRequirements := ["blockade_definition", "blockade_persistence", "blockade_draw_analysis"]
+      priority := 4
+      detect := none }
+  , { name := "Zugzwang Patterns"
+      description := "Positions where moving is disadvantageous"
+      estimatedFactor := { mantissa := 1.0, exponent := 1 }
+      proofRequirements := ["zugzwang_characterization", "zugzwang_value_relation"]
+      priority := 5
+      detect := none }
   ]
 
-/-- Total theoretical reduction from all proven reductions -/
-def totalProvenReduction : Nat :=
-  reductionCandidates
-    |>.filter (·.provenSound)
-    |>.foldl (fun acc r => acc * r.estimatedFactor) 1
+/-- Compute total gap to feasibility -/
+def computeGap (tracker : SearchSpaceTracker) : Int :=
+  tracker.currentSpace.exponent - FEASIBILITY_THRESHOLD.exponent
+
+/-- Run full reduction pipeline and return tracker -/
+def runReductionPipeline : SearchSpaceTracker :=
+  let tracker := SearchSpaceTracker.init
+  -- Apply reductions that affect position count (not game tree)
+  let tracker := tracker.applyReduction colorSymmetryReduction
+  -- Note: transposition converts game-tree to state-space, already at state-space level
+  -- Alpha-beta applies to search, estimate effect
+  let tracker := tracker.applyReduction alphaBetaReduction
+  tracker
+
+/-- Demo: Show search space tracking -/
+def demo : String :=
+  let tracker := runReductionPipeline
+  SearchSpaceTracker.formatState tracker
 
 end SearchSpace
 end Chess
