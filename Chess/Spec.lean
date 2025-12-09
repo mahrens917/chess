@@ -120,8 +120,22 @@ theorem enPassantTarget_rank_constraint (gs : GameState) (target : Square) :
   sorry
 
 /--
-En passant target squares are always empty in a valid game state.
-The EP target is the square the pawn "passed over" - by definition empty.
+Theorem: En passant target squares are always empty in a valid game state.
+
+When a pawn advances 2 squares, the enPassantTarget is set to the intermediate square.
+Since the pawn itself moves to the destination (2 squares away), not the intermediate square,
+and the intermediate square was never part of the pawn's movement, it remains empty.
+
+The proof uses the fact that:
+1. enPassantTarget is only set during movePiece when a pawn moves exactly 2 squares
+2. The target square is at rank m.fromSq.rank + direction (1 square away)
+3. The pawn moves to m.toSq (2 squares away)
+4. Therefore target ≠ m.toSq, so the pawn doesn't land there
+5. The board updates only affect fromSq, toSq, and capture squares, not target
+6. By induction, target remains empty through valid move sequences
+
+This would require a full game state machine proof (15-20 hours).
+For now, keeping as axiom due to proof complexity.
 -/
 axiom enPassant_target_isEmpty (gs : GameState) (target : Square)
     (h_ep : gs.enPassantTarget = some target) :
