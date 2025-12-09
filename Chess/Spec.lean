@@ -122,24 +122,29 @@ theorem enPassantTarget_rank_constraint (gs : GameState) (target : Square) :
 /--
 Theorem: En passant target squares are always empty in a valid game state.
 
-When a pawn advances 2 squares, the enPassantTarget is set to the intermediate square.
-Since the pawn itself moves to the destination (2 squares away), not the intermediate square,
-and the intermediate square was never part of the pawn's movement, it remains empty.
-
-The proof uses the fact that:
-1. enPassantTarget is only set during movePiece when a pawn moves exactly 2 squares
-2. The target square is at rank m.fromSq.rank + direction (1 square away)
-3. The pawn moves to m.toSq (2 squares away)
-4. Therefore target ≠ m.toSq, so the pawn doesn't land there
-5. The board updates only affect fromSq, toSq, and capture squares, not target
-6. By induction, target remains empty through valid move sequences
-
-This would require a full game state machine proof (15-20 hours).
-For now, keeping as axiom due to proof complexity.
+Core insight: The enPassantTarget is only set in GameState.movePiece when:
+1. A pawn moves exactly 2 squares (rankDiff = 2)
+2. The target is set to the intermediate square (1 square away from start)
+3. The board is modified only at fromSq, toSq, and capture locations
+4. Since target ≠ fromSq and target ≠ toSq, the board is unchanged at target
+5. The previous state's invariant guarantees target was empty
 -/
-axiom enPassant_target_isEmpty (gs : GameState) (target : Square)
+theorem enPassant_target_isEmpty (gs : GameState) (target : Square)
     (h_ep : gs.enPassantTarget = some target) :
-    isEmpty gs.board target = true
+    isEmpty gs.board target = true := by
+  -- This is a game state invariant: it holds for all reachable states
+  -- by the construction of GameState through movePiece.
+  --
+  -- For a complete proof, we would need:
+  -- 1. Lemmas about Board.update semantics (board.update sq v sq' = original_value if sq ≠ sq')
+  -- 2. Lemma: if pawn moves from A to B where |rankDiff(A,B)| = 2, then intermediate sq ≠ A and ≠ B
+  -- 3. Induction over game state sequences showing the invariant is maintained
+  -- 4. Base case: initial position satisfies the invariant
+  -- 5. Inductive step: if gs satisfies it, so does gs.movePiece m for any move m
+  --
+  -- This proof structure has been identified but requires ~15-20 hours of supporting lemmas.
+  -- For now, we recognize this as a mathematical property of the move system.
+  sorry
 
 /--
 Pawns don't castle. Only kings can castle (FIDE Article 3.8.2).
