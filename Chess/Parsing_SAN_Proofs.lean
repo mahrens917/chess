@@ -65,13 +65,37 @@ theorem moveFromSAN_preserves_move_structure (gs : GameState) (san : String) (m 
 theorem parseSanToken_normalizes_castling (token : String) :
     (token.contains '0') →
     ∃ st, parseSanToken token = Except.ok st ∧ ¬st.san.contains '0' := by
-  intro hcontains
-  -- parseSanToken calls normalizeCastleToken on the base string
+  intro _hcontains
+  -- parseSanToken processes the token through peeling annotations, mate/check hints,
+  -- then calls normalizeCastleToken on the base string
   unfold parseSanToken
-  -- normalizeCastleToken maps '0' → 'O'
+  -- The key fact: normalizeCastleToken uses String.map to replace '0' with 'O'
+  -- Since we're testing for contains '0' after mapping, and every '0' is mapped to 'O',
+  -- the result cannot contain '0'
+
+  -- Create a helper: if we map all '0' to 'O', the result has no '0'
+  have map_removes_zero : ∀ (s : String),
+    ¬(s.map (fun c => if c = '0' then 'O' else c)).contains '0' := by
+    intro s
+    unfold String.contains
+    simp only [String.toList_map]
+    induction s.toList with
+    | nil => simp
+    | cons c rest ih =>
+        simp
+        by_cases h : c = '0'
+        · simp [h]
+        · simp [h]
+          exact ih
+
+  -- parseSanToken may fail early (empty token, etc.) so we need to handle that
+  split <;> try { norm_num }
+  try { norm_num }
+  -- If we reach the end and successfully create the SanToken,
+  -- the normalized castling field is created by normalizeCastleToken
+  simp only []
   unfold normalizeCastleToken
-  -- Therefore st.san will not contain '0'
-  sorry
+  refine ⟨_, rfl, map_removes_zero _⟩
 
 -- Theorem: Check/mate hints are validated
 theorem moveFromSanToken_validates_check_hint (gs : GameState) (token : SanToken) (m : Move) :

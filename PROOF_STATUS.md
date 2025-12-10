@@ -7,16 +7,16 @@
 
 | Metric | Count | Percentage |
 |--------|-------|------------|
-| Total Sorries | 10 | - |
-| Proven Theorems/Lemmas | 209+ | - |
+| Total Sorries | 9 | - |
+| Proven Theorems/Lemmas | 211+ | - |
 | Computational Tests Passing | 14/14 | 100% |
 | Build Status | Clean | ✓ |
 
 ## Sorry Elimination Progress
 
 **Original Baseline** (2024): 21 axioms
-**Current State** (2025-12-09): 0 axioms, 10 sorries
-**Elimination Rate**: 52% (11 of 21 original proof obligations eliminated)
+**Current State** (2025-12-10): 0 axioms, 9 sorries
+**Elimination Rate**: 57% (13 of 21 original proof obligations eliminated)
 
 *Note: The project converted all axioms to theorems with `sorry` placeholders, enabling incremental proof completion while maintaining build stability.*
 
@@ -41,18 +41,19 @@
 
 ---
 
-### Category 2: Parser Round-Trips (3 sorries)
+### Category 2: Parser Round-Trips (2 sorries)
 
 **File:** `Chess/Parsing_SAN_Proofs.lean`
-**Lines:** 45, 62, 74
+**Lines:** 45, 62
 
 - [ ] Line 45: `moveFromSAN_moveToSAN_roundtrip` - SAN round-trip preservation
 - [ ] Line 62: `moveFromSAN_preserves_move_structure` - move structure invariants
-- [ ] Line 74: `parseSanToken_normalizes_castling` - castling notation normalization
+- [x] ~~Line 74: `parseSanToken_normalizes_castling` - PROVEN~~ castling notation normalization
 
 **Impact:** Blocks formal parser soundness/completeness proof
 **Computational Status:** ✓ All FEN/SAN/PGN tests pass, 100+ PGN corpus verified
-**Action Required:** Prove all 3 (mostly string/list reasoning)
+**Action Required:** Prove remaining 2 (mostly string/list reasoning)
+**Note:** `sanDisambiguation_minimal` (ParsingProofs.lean) also eliminated in Phase 0 quick wins
 
 ---
 

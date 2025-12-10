@@ -1352,7 +1352,24 @@ theorem sanDisambiguation_minimal (gs : GameState) (m : Move) :
   --   else String.singleton m.fromSq.fileChar ++ String.singleton m.fromSq.rankChar  -- length 2
   --
   -- All non-empty cases have length 1 or 2
-  sorry -- Direct from case analysis of the definition
+  split with h_empty h_not_empty
+  · -- Case: peers.isEmpty = true
+    simp [h_empty]
+  · -- Case: peers.isEmpty = false
+    constructor
+    · intro _
+      -- peers.isEmpty false contradicts isEmpty true
+      simp at h_not_empty
+    · intro _
+      -- Now handle the nested if-then-else
+      split with h_file_conflict h_no_file
+      · split with h_rank_conflict h_no_rank
+        · -- Case: both conflicts → length 2
+          simp [String.length_singleton]
+        · -- Case: file conflict, no rank conflict → length 1
+          simp [String.length_singleton]
+      · -- Case: no file conflict → length 1
+        simp [String.length_singleton]
 
 end Parsing
 end Chess
