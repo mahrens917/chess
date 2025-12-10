@@ -1561,23 +1561,55 @@ lemma san_unique_both_pawn_advances (gs : GameState) (m1 m2 : Move)
 
   -- Use string equality to extract components
   have h_dest_eq : m1.toSq.algebraic = m2.toSq.algebraic := by
-    -- Both algebraic strings are exactly 2 characters
+    -- algebraic notation is exactly 2 characters (file + rank)
+    -- String.take extracts the first n characters
+    have h1_alg : (m1.toSq.algebraic ++ promotionSuffix m1.promotion).take 2 = m1.toSq.algebraic := by
+      simp [String.take_append]
+    have h2_alg : (m2.toSq.algebraic ++ promotionSuffix m2.promotion).take 2 = m2.toSq.algebraic := by
+      simp [String.take_append]
     -- If full strings are equal, their 2-char prefixes are equal
-    -- algebraic always has exactly 2 chars by construction (file + rank)
-    sorry -- String prefix extraction - would use String.take once we have the lemma
+    rw [h_san_eq] at h1_alg
+    exact h1_alg.symm.trans h2_alg
 
   have h_promotion_eq : promotionSuffix m1.promotion = promotionSuffix m2.promotion := by
-    -- The promotion is the suffix after the algebraic part (positions 2+)
-    -- If full strings equal and algebraic parts equal, then suffixes equal
-    sorry -- String suffix extraction - would use String.drop once we have the lemma
+    -- String.drop removes the first n characters
+    have h1_promo : (m1.toSq.algebraic ++ promotionSuffix m1.promotion).drop 2 = promotionSuffix m1.promotion := by
+      simp [String.drop_append, h_dest_eq]
+    have h2_promo : (m2.toSq.algebraic ++ promotionSuffix m2.promotion).drop 2 = promotionSuffix m2.promotion := by
+      simp [String.drop_append, h_dest_eq]
+    -- If full strings are equal, their suffixes are equal
+    rw [h_san_eq] at h1_promo
+    exact h1_promo.symm.trans h2_promo
 
-  -- With same destination, a pawn can only move from one source square
+  -- With same destination and same promotion, source square is determined
+  -- For pawn advances: move is determined by destination and promotion
+  -- Since both destination and promotion are equal, the moves are equivalent
+
+  -- For a legal pawn advance from gamestate gs:
+  -- - Source square is uniquely determined by destination and piece color
+  -- - White pawns advance upward (rank 1→8), black downward (rank 8→1)
+  -- - File stays the same
   have h_from_eq : m1.fromSq = m2.fromSq := by
-    -- For pawns, source square is determined by:
-    -- - Piece color (from color field)
-    -- - Destination square
-    -- - Move direction (always forward for pawn advance)
-    sorry -- Pawn advance uniqueness by piece color and destination
+    ext
+    · -- fileNat: pawn advance stays in same file
+      -- This is encoded in the algebraic notation - no file character means same file
+      -- For legal pawn moves, fromSq.fileNat = toSq.fileNat
+      have : m1.fromSq.fileNat = m1.toSq.fileNat := by
+        -- In a legal game position, a pawn advance doesn't change file
+        -- This is implicit in the move legality check
+        sorry -- Pawn advance property: same file
+      have : m2.fromSq.fileNat = m2.toSq.fileNat := by
+        sorry -- Pawn advance property: same file
+      simp [h_dest_eq] at *
+      omega
+    · -- rankNat: pawn advance is exactly 1 rank forward or 2 from starting position
+      have : m1.fromSq.rankNat + 1 = m1.toSq.rankNat ∨ m1.fromSq.rankNat + 2 = m1.toSq.rankNat := by
+        -- From move legality: pawn can advance 1 or 2 squares from starting position
+        sorry -- Pawn advance rank property
+      have : m2.fromSq.rankNat + 1 = m2.toSq.rankNat ∨ m2.fromSq.rankNat + 2 = m2.toSq.rankNat := by
+        sorry -- Pawn advance rank property
+      simp [h_dest_eq] at *
+      omega
 
   exact ⟨h_from_eq, rfl, h_dest_eq, by sorry⟩
 
@@ -1608,32 +1640,66 @@ lemma san_unique_both_pawn_captures (gs : GameState) (m1 m2 : Move)
   -- For the strings to be equal, each component must be equal
   have h_file_eq : m1.fromSq.fileChar = m2.fromSq.fileChar := by
     -- First character of both sides must match
-    have : (String.singleton m1.fromSq.fileChar ++ "x" ++ m1.toSq.algebraic ++ promotionSuffix m1.promotion).get? 0 =
-            (String.singleton m2.fromSq.fileChar ++ "x" ++ m2.toSq.algebraic ++ promotionSuffix m2.promotion).get? 0 := by
-      rw [h_san_eq]
+    -- Use String.take to extract the first character
+    have h1_file : (String.singleton m1.fromSq.fileChar ++ "x" ++ m1.toSq.algebraic ++ promotionSuffix m1.promotion).take 1 =
+                   String.singleton m1.fromSq.fileChar := by
+      simp [String.take_append]
+    have h2_file : (String.singleton m2.fromSq.fileChar ++ "x" ++ m2.toSq.algebraic ++ promotionSuffix m2.promotion).take 1 =
+                   String.singleton m2.fromSq.fileChar := by
+      simp [String.take_append]
+    rw [h_san_eq] at h1_file
+    have : String.singleton m1.fromSq.fileChar = String.singleton m2.fromSq.fileChar := h1_file.symm.trans h2_file
     simp [String.singleton] at this
-    sorry -- Would need string indexing lemmas
+    exact this
 
   have h_dest_eq : m1.toSq.algebraic = m2.toSq.algebraic := by
-    -- Characters at positions 2-3 (after "f" + "x")
-    sorry -- Would need substring extraction lemmas
+    -- Extract algebraic: take first 4 chars, then drop first 2
+    have h1_dest : (String.singleton m1.fromSq.fileChar ++ "x" ++ m1.toSq.algebraic ++ promotionSuffix m1.promotion).take 4 =
+                   String.singleton m1.fromSq.fileChar ++ "x" ++ m1.toSq.algebraic := by
+      simp [String.take_append]
+    have h2_dest : (String.singleton m2.fromSq.fileChar ++ "x" ++ m2.toSq.algebraic ++ promotionSuffix m2.promotion).take 4 =
+                   String.singleton m2.fromSq.fileChar ++ "x" ++ m2.toSq.algebraic := by
+      simp [String.take_append]
+    rw [h_san_eq] at h1_dest
+    have eq_first_4 : String.singleton m1.fromSq.fileChar ++ "x" ++ m1.toSq.algebraic =
+                      String.singleton m2.fromSq.fileChar ++ "x" ++ m2.toSq.algebraic := h1_dest.symm.trans h2_dest
+    -- Drop the first 2 characters (file + "x")
+    have : m1.toSq.algebraic = m2.toSq.algebraic := by
+      simp [String.drop_append, h_file_eq] at eq_first_4
+      exact eq_first_4
+    exact this
 
   have h_promotion_eq : promotionSuffix m1.promotion = promotionSuffix m2.promotion := by
-    -- Characters after position 4
-    sorry -- Would need suffix extraction after algebraic
+    -- Drop first 4 characters to get promotion
+    have h1_promo : (String.singleton m1.fromSq.fileChar ++ "x" ++ m1.toSq.algebraic ++ promotionSuffix m1.promotion).drop 4 =
+                    promotionSuffix m1.promotion := by
+      simp [String.drop_append]
+    have h2_promo : (String.singleton m2.fromSq.fileChar ++ "x" ++ m2.toSq.algebraic ++ promotionSuffix m2.promotion).drop 4 =
+                    promotionSuffix m2.promotion := by
+      simp [String.drop_append]
+    rw [h_san_eq] at h1_promo
+    exact h1_promo.symm.trans h2_promo
 
-  -- From file and same piece type (pawn), we can determine from square
+  -- From file and destination, source rank is determined by pawn capture geometry
   have h_from_eq : m1.fromSq = m2.fromSq := by
-    -- Pawn file determines which file the pawn came from
     ext
-    · -- fileNat
-      simp [Square.fileChar] at h_file_eq
-      sorry -- Need fileChar injectivity
-    · -- rankNat
-      -- Source rank depends on capture direction (always 1 away)
-      sorry -- Pawn can only capture diagonally
+    · -- fileNat: source file is from capture, which equals fileChar
+      unfold Square.fileChar at h_file_eq
+      have h1_inj : m1.fromSq.fileNat = m2.fromSq.fileNat := by
+        have h1f : m1.fromSq.fileNat < 8 := m1.fromSq.file.isLt
+        have h2f : m2.fromSq.fileNat < 8 := m2.fromSq.file.isLt
+        exact fileChar_injective m1.fromSq.fileNat m2.fromSq.fileNat h1f h2f h_file_eq
+      exact h1_inj
+    · -- rankNat: source rank is one rank away from destination (diagonal capture)
+      -- Pawn capture always moves diagonally: same file ± 1, rank ± 1
+      have : m1.fromSq.rankNat + 1 = m1.toSq.rankNat ∨ m1.toSq.rankNat + 1 = m1.fromSq.rankNat := by
+        sorry -- Pawn capture property: adjacent rank
+      have : m2.fromSq.rankNat + 1 = m2.toSq.rankNat ∨ m2.toSq.rankNat + 1 = m2.fromSq.rankNat := by
+        sorry -- Pawn capture property: adjacent rank
+      simp [h_dest_eq] at *
+      omega
 
-  exact ⟨h_from_eq, rfl, by sorry, by sorry⟩
+  exact ⟨h_from_eq, rfl, h_dest_eq, by sorry⟩
 
 /-- Sub-case 3c: One pawn is advance, other is capture
     Formats differ: "e4" vs "exd4" (presence of 'x')
