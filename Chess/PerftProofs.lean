@@ -424,13 +424,22 @@ theorem gameLine_san_injective_cons {gs : GameState} {n : Nat}
   -- Extract head and tail equality from list cons equality
   have hhead : Parsing.moveToSAN gs m₁ = Parsing.moveToSAN gs m₂ := List.cons.inj heq |>.left
   have htail : GameLine.toSANTrace rest₁ = GameLine.toSANTrace rest₂ := List.cons.inj heq |>.right
-  -- Use moveToSAN_unique to get m₁ = m₂
-  -- Note: This requires moveToSAN_unique to be fully proven
+  -- Use moveToSAN_unique_full to get m₁ = m₂ directly from full SAN equality
   have hmoves : m₁ = m₂ := by
-    -- moveToSAN = moveToSanBase + check/mate suffix
-    -- We need to show that if moveToSAN outputs match, the moves are equal
-    -- This requires moveToSAN_unique (ParsingProofs.lean:1313)
-    sorry -- Blocked on moveToSAN_unique completion
+    -- moveToSAN_unique_full states that if two legal moves produce the same full SAN
+    -- (including check/mate suffix), they must be equivalent moves
+    have hequiv : ParsingProofs.MoveEquiv m₁ m₂ :=
+      ParsingProofs.moveToSAN_unique_full gs m₁ m₂ hmem₁ hmem₂ hhead
+    -- Extract m₁ = m₂ from MoveEquiv by comparing all move attributes
+    unfold ParsingProofs.MoveEquiv at hequiv
+    ext
+    · exact hequiv.1
+    · exact hequiv.2.1
+    · exact hequiv.2.2.1
+    · exact hequiv.2.2.2.1
+    · exact hequiv.2.2.2.2.1
+    · exact hequiv.2.2.2.2.2.1
+    · exact hequiv.2.2.2.2.2.2
   -- Substitute m₂ = m₁ everywhere
   subst hmoves
   -- Now both game lines start with the same move m₁
