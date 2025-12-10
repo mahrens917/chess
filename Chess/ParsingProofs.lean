@@ -1466,35 +1466,37 @@ lemma san_unique_both_pawn_advances (gs : GameState) (m1 m2 : Move)
     (h2_no_cap : ¬(m2.isCapture ∨ m2.isEnPassant))
     (h_san_eq : moveToSanBase gs m1 = moveToSanBase gs m2) :
     MoveEquiv m1 m2 := by
-  -- Both pawn advances: format is "" + "" + destination + [=promotion]
+  -- Both pawn advances: format is "" + "" + algebraic(dest) + promotion
   -- So SAN = algebraic(toSq) ++ promotionSuffix(promotion)
   simp only [moveToSanBase, h1_pawn, h2_pawn, ite_true] at h_san_eq
   simp only [h1_no_cap, h2_no_cap, ite_false] at h_san_eq
-  -- h_san_eq: algebraic(m1.toSq) ++ promotionSuffix(m1.promotion) =
-  --           algebraic(m2.toSq) ++ promotionSuffix(m2.promotion)
-  -- algebraic notation is always 2 characters (file + rank), e.g., "e4"
+  -- h_san_eq: m1.toSq.algebraic ++ promotionSuffix m1.promotion =
+  --           m2.toSq.algebraic ++ promotionSuffix m2.promotion
+
+  -- Key: algebraic notation is always 2 chars (file + rank)
+  -- promotionSuffix is 0 or 2+ chars ("" or "=Q", "=R", "=B", "=N")
+  -- So the first 2 chars of the concatenation are the destination
+
+  -- Use string equality to extract components
   have h_dest_eq : m1.toSq.algebraic = m2.toSq.algebraic := by
-    -- Extract first 2 characters (the algebraic notation) from both sides
-    have len1_ge : m1.toSq.algebraic.length ≥ 2 := by norm_num -- algebraic is always "ab" format
-    have len2_ge : m2.toSq.algebraic.length ≥ 2 := by norm_num
-    have len_eq : (m1.toSq.algebraic ++ promotionSuffix m1.promotion).length =
-                  (m2.toSq.algebraic ++ promotionSuffix m2.promotion).length := by
-      rw [h_san_eq]
-    -- The first 2 characters must match in equal strings
-    have h_prefix : String.take 2 (m1.toSq.algebraic ++ promotionSuffix m1.promotion) =
-                    String.take 2 (m2.toSq.algebraic ++ promotionSuffix m2.promotion) := by
-      rw [h_san_eq]
-    simp [String.take] at h_prefix
-    -- Since algebraic is 2 chars, taking 2 gives the full algebraic
-    sorry -- TODO: Use String.take to extract and show equality
+    -- Both algebraic strings are exactly 2 characters
+    -- If full strings are equal, their 2-char prefixes are equal
+    -- algebraic always has exactly 2 chars by construction (file + rank)
+    sorry -- String prefix extraction - would use String.take once we have the lemma
+
   have h_promotion_eq : promotionSuffix m1.promotion = promotionSuffix m2.promotion := by
-    -- The suffix is the remainder after the algebraic part (positions 2+)
-    sorry -- TODO: Use String.drop to extract suffix
-  -- With equal destinations and promotions, we need equal sources (from legality of pawn advance)
+    -- The promotion is the suffix after the algebraic part (positions 2+)
+    -- If full strings equal and algebraic parts equal, then suffixes equal
+    sorry -- String suffix extraction - would use String.drop once we have the lemma
+
+  -- With same destination, a pawn can only move from one source square
   have h_from_eq : m1.fromSq = m2.fromSq := by
-    -- Pawn at a square can only advance to one square per rank
-    -- Same piece type, same destination, both legal → same source
-    sorry -- TODO: Use pawn movement rules
+    -- For pawns, source square is determined by:
+    -- - Piece color (from color field)
+    -- - Destination square
+    -- - Move direction (always forward for pawn advance)
+    sorry -- Pawn advance uniqueness by piece color and destination
+
   exact ⟨h_from_eq, rfl, h_dest_eq, by sorry⟩
 
 /-- Sub-case 3b: Both are pawn captures
