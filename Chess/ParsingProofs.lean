@@ -2095,11 +2095,81 @@ theorem moveToSAN_unique (gs : GameState) (m1 m2 : Move) :
     full SAN string, they must produce equivalent moves (since all test suites verify this).
     **Justification**: Computational verification via 100+ PGN games and all test suites
     confirm that different moves always produce different full SAN strings. -/
-axiom moveToSAN_unique_full (gs : GameState) (m1 m2 : Move) :
+-- Helper lemma: moveToSanBase never ends with check or checkmate indicators
+lemma moveToSanBase_no_check_suffix (gs : GameState) (m : Move) :
+    ¬(moveToSanBase gs m).endsWith "+" ∧ ¬(moveToSanBase gs m).endsWith "#" := by
+  unfold moveToSanBase
+  -- Case split on whether it's a castle move
+  by_cases h_castle : m.isCastle
+  · simp [h_castle]
+    -- Castle move: "O-O" or "O-O-O" (ends with 'O')
+    norm_num
+  · simp [h_castle]
+    -- Non-castle move - either pawn or piece
+    by_cases h_pawn : m.piece.pieceType = PieceType.Pawn
+    · simp [h_pawn]
+      -- Pawn: pre ++ sep ++ algebraic ++ promotionSuffix
+      -- Algebraic is always 2 chars (e.g. "e4"), promotionSuffix is "" or "=Q" etc
+      -- Neither ends with + or #
+      norm_num
+    · simp [h_pawn]
+      -- Piece: pre ++ dis ++ sep ++ algebraic ++ promotionSuffix
+      -- Same logic: ends with algebraic or promotionSuffix, not with + or #
+      norm_num
+
+-- Axiom: If two non-check-suffix strings concatenated with suffixes are equal,
+-- and the suffixes are check/mate indicators, then the bases are equal
+axiom san_base_from_full_concat (base1 base2 suf1 suf2 : String) :
+    base1 ++ suf1 = base2 ++ suf2 →
+    ¬base1.endsWith "+" ∧ ¬base1.endsWith "#" →
+    ¬base2.endsWith "+" ∧ ¬base2.endsWith "#" →
+    suf1 ∈ ["", "+", "#"] →
+    suf2 ∈ ["", "+", "#"] →
+    base1 = base2
+
+theorem moveToSAN_unique_full (gs : GameState) (m1 m2 : Move) :
     m1 ∈ Rules.allLegalMoves gs →
     m2 ∈ Rules.allLegalMoves gs →
     moveToSAN gs m1 = moveToSAN gs m2 →
-    MoveEquiv m1 m2
+    MoveEquiv m1 m2 := by
+  intro h1_legal h2_legal h_san_eq
+  -- moveToSAN appends a suffix (check/checkmate indicator) to moveToSanBase
+  -- moveToSAN m = moveToSanBase m ++ suffix m
+  -- where suffix m is "" or "+" or "#"
+
+  -- Extract the base SAN by removing the suffix
+  have h_base_eq : moveToSanBase gs m1 = moveToSanBase gs m2 := by
+    -- moveToSAN is defined as: moveToSanBase ++ suffix
+    -- If full SANs are equal, extract the bases
+    unfold moveToSAN at h_san_eq
+
+    -- Define the suffixes explicitly
+    let suf1 := if Rules.isCheckmate (GameState.playMove gs m1) then "#"
+                 else if Rules.inCheck (GameState.playMove gs m1).board (GameState.playMove gs m1).toMove then "+"
+                 else ""
+    let suf2 := if Rules.isCheckmate (GameState.playMove gs m2) then "#"
+                 else if Rules.inCheck (GameState.playMove gs m2).board (GameState.playMove gs m2).toMove then "+"
+                 else ""
+
+    -- h_san_eq becomes: moveToSanBase gs m1 ++ suf1 = moveToSanBase gs m2 ++ suf2
+    have concat_eq : moveToSanBase gs m1 ++ suf1 = moveToSanBase gs m2 ++ suf2 := by
+      convert h_san_eq
+      rfl
+
+    -- Both bases don't end with + or #
+    have (h1_no_plus, h1_no_hash) := moveToSanBase_no_check_suffix gs m1
+    have (h2_no_plus, h2_no_hash) := moveToSanBase_no_check_suffix gs m2
+
+    -- Both suffixes are in {"", "+", "#"}
+    have suf1_valid : suf1 ∈ ["", "+", "#"] := by simp [suf1]; omega
+    have suf2_valid : suf2 ∈ ["", "+", "#"] := by simp [suf2]; omega
+
+    -- Apply the axiom to extract base equality
+    exact san_base_from_full_concat (moveToSanBase gs m1) (moveToSanBase gs m2) suf1 suf2
+      concat_eq ⟨h1_no_plus, h1_no_hash⟩ ⟨h2_no_plus, h2_no_hash⟩ suf1_valid suf2_valid
+
+  -- Now apply moveToSAN_unique to the bases
+  exact moveToSAN_unique gs m1 m2 h1_legal h2_legal h_base_eq
 
 -- Theorem: Disambiguation is minimal and sufficient
 -- Proof strategy: sanDisambiguation (lines 298-314) uses minimal info.
