@@ -214,29 +214,230 @@ def runReductionPipeline : SearchSpaceTracker :=
 
 ## 5. The Discovery System
 
-### 5.1 The Discovery Loop
+### 5.1 System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      DISCOVERY SYSTEM                                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                    IDEA GENERATION                           │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │    │
+│  │  │ Game Player │  │  Literature │  │  LLM Hypothesis     │  │    │
+│  │  │ (self-play) │  │  Scanner    │  │  Generator          │  │    │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │    │
+│  │         │                │                     │             │    │
+│  │         └────────────────┼─────────────────────┘             │    │
+│  │                          ▼                                   │    │
+│  │                 ┌─────────────────┐                          │    │
+│  │                 │ Candidate Queue │                          │    │
+│  │                 └────────┬────────┘                          │    │
+│  └──────────────────────────┼───────────────────────────────────┘    │
+│                             ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                    FORMALIZATION                             │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │    │
+│  │  │ Human +     │  │ LLM Lean    │  │  Pattern Extractor  │  │    │
+│  │  │ Interactive │  │ Code Gen    │  │  (from games)       │  │    │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │    │
+│  │         └────────────────┼─────────────────────┘             │    │
+│  │                          ▼                                   │    │
+│  │                 ┌─────────────────┐                          │    │
+│  │                 │ Lean Definition │                          │    │
+│  │                 └────────┬────────┘                          │    │
+│  └──────────────────────────┼───────────────────────────────────┘    │
+│                             ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                    PROOF ENGINE                              │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │    │
+│  │  │ Lean Tactic │  │ LLM Proof   │  │  Human Guided       │  │    │
+│  │  │ Auto-search │  │ Assistant   │  │  Interactive        │  │    │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │    │
+│  │         └────────────────┼─────────────────────┘             │    │
+│  │                          ▼                                   │    │
+│  │              ┌───────────────────────┐                       │    │
+│  │              │ Verified Lean Theorem │                       │    │
+│  │              └───────────┬───────────┘                       │    │
+│  └──────────────────────────┼───────────────────────────────────┘    │
+│                             ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                    QUANTIFICATION                            │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │    │
+│  │  │ Position    │  │ Sampling    │  │  Analytical         │  │    │
+│  │  │ Enumeration │  │ Estimator   │  │  Calculation        │  │    │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │    │
+│  │         └────────────────┼─────────────────────┘             │    │
+│  │                          ▼                                   │    │
+│  │                 ┌─────────────────┐                          │    │
+│  │                 │ Exact Factor    │──▶ SearchSpaceTracker    │    │
+│  │                 └─────────────────┘                          │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 Idea Generation Sources
+
+| Source | Method | Automation | Status |
+|--------|--------|------------|--------|
+| **Self-Play** | Play games, find patterns in draws/wins | Automated | **Not Implemented** |
+| **Literature** | Scan papers for reduction techniques | Semi-auto | **Not Implemented** |
+| **LLM Hypothesis** | Ask LLM to propose reductions | Interactive | **This conversation!** |
+| **Human Expert** | Chess/math expert proposes ideas | Manual | **Current method** |
+| **Tablebase Mining** | Analyze solved positions for patterns | Automated | **Not Implemented** |
+
+### 5.3 How Each Source Would Work
+
+#### Source A: Self-Play Game Analysis
+```
+1. Engine plays 1M games against itself
+2. Cluster final positions by outcome (win/draw/loss)
+3. Extract features that correlate with outcome:
+   - Material balance
+   - Pawn structure hash
+   - King safety score
+   - Piece mobility
+4. Features with high correlation → Candidate reductions
+5. Example insight: "90% of games with blocked center pawns end in draw"
+```
+
+**Implementation**: Requires chess engine + ML clustering
+
+#### Source B: Literature Scanner
+```
+1. Scrape chess research papers (arXiv, ICGA Journal)
+2. Extract claims about position equivalence or pruning
+3. Convert to formal hypothesis
+4. Example: Paper says "opposite-color bishop endings are usually drawn"
+   → Candidate: OCB endgame reduction
+```
+
+**Implementation**: Requires NLP + paper database
+
+#### Source C: LLM Hypothesis Generator (Current!)
+```
+Human: "What properties might make positions equivalent?"
+LLM: "Consider these hypotheses:
+  1. Positions with same pawn skeleton have similar evaluations
+  2. Fortress patterns guarantee draw regardless of moves
+  3. Blockaded positions reduce to smaller search spaces
+  4. ..."
+Human: "Let's formalize #2"
+LLM: [Generates Lean definition]
+```
+
+**Implementation**: This is what we're doing right now!
+
+#### Source D: Tablebase Mining
+```
+1. Load 7-piece tablebase (5.5 × 10^11 positions)
+2. Find patterns in drawn positions:
+   - What material combinations always draw?
+   - What king positions guarantee safety?
+3. Generalize patterns to 8+ piece positions
+4. Example: "K+B vs K+N with pawns on same file always draws"
+```
+
+**Implementation**: Requires tablebase access + pattern mining
+
+### 5.4 The Interactive Loop (Current Implementation)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    DISCOVERY SYSTEM                          │
+│                 CURRENT DISCOVERY PROCESS                    │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌────────┐│
-│  │ IDENTIFY │───▶│FORMALIZE │───▶│  PROVE   │───▶│QUANTIFY││
-│  └──────────┘    └──────────┘    └──────────┘    └────────┘│
-│       │                                              │      │
-│       │              ┌──────────┐                    │      │
-│       └──────────────│IMPLEMENT │◀───────────────────┘      │
-│                      └──────────┘                           │
-│                           │                                 │
-│                           ▼                                 │
-│                    ┌──────────┐                             │
-│                    │  TRACK   │──▶ Update SearchSpaceTracker│
-│                    └──────────┘                             │
+│   Human                        LLM (Claude)                  │
+│     │                              │                         │
+│     │  "What reductions exist?"   │                         │
+│     │ ─────────────────────────▶  │                         │
+│     │                              │                         │
+│     │  [Lists known reductions]    │                         │
+│     │ ◀─────────────────────────  │                         │
+│     │                              │                         │
+│     │  "Propose new ones"          │                         │
+│     │ ─────────────────────────▶  │                         │
+│     │                              │                         │
+│     │  [Generates hypotheses]      │                         │
+│     │ ◀─────────────────────────  │                         │
+│     │                              │                         │
+│     │  "Formalize fortress"        │                         │
+│     │ ─────────────────────────▶  │                         │
+│     │                              │                         │
+│     │  [Writes Lean definition]    │                         │
+│     │ ◀─────────────────────────  │                         │
+│     │                              │                         │
+│     │  "Prove it"                  │                         │
+│     │ ─────────────────────────▶  │                         │
+│     │                              │                         │
+│     │  [Attempts proof, may need   │                         │
+│     │   human guidance on hard     │                         │
+│     │   mathematical steps]        │                         │
+│     │ ◀─────────────────────────  │                         │
+│     │                              │                         │
+│     │  "Add to tracker"            │                         │
+│     │ ─────────────────────────▶  │                         │
+│     │                              │                         │
+│     │  [Updates SearchSpaceTracker]│                         │
+│     │ ◀─────────────────────────  │                         │
+│     │                              │                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 5.2 Discovery Sources
+### 5.5 Automation Roadmap
+
+| Phase | Components | Automation Level |
+|-------|------------|------------------|
+| **Phase 1 (Current)** | Human + LLM conversation | Interactive |
+| **Phase 2** | Add self-play game analysis | Semi-automated |
+| **Phase 3** | Add tablebase mining | Semi-automated |
+| **Phase 4** | Add Lean auto-prover integration | Mostly automated |
+| **Phase 5** | Full pipeline with human review | Supervised automated |
+
+### 5.6 What We Need to Build
+
+```lean
+/-- Automated hypothesis generator -/
+structure HypothesisGenerator where
+  /-- Generate candidates from game analysis -/
+  fromGames : List Game → List ReductionCandidate
+  /-- Generate candidates from position clusters -/
+  fromClusters : List (List GameState) → List ReductionCandidate
+  /-- Generate candidates from tablebase patterns -/
+  fromTablebase : TablebaseDB → List ReductionCandidate
+
+/-- Interactive session with LLM -/
+structure LLMSession where
+  /-- Ask LLM to propose reductions -/
+  proposeReductions : String → IO (List ReductionCandidate)
+  /-- Ask LLM to formalize a hypothesis -/
+  formalize : ReductionCandidate → IO (Option LeanDefinition)
+  /-- Ask LLM to attempt a proof -/
+  proveWith : LeanDefinition → IO (Option LeanProof)
+
+/-- The full discovery pipeline -/
+def discoveryPipeline : IO Unit := do
+  -- 1. Gather candidates from all sources
+  let gameInsights ← analyzeGames 1000000
+  let tablebasePatterns ← mineTablebase syzygy7
+  let llmHypotheses ← askLLM "propose chess reductions"
+
+  -- 2. Rank and filter candidates
+  let candidates := rankByCriteria (gameInsights ++ tablebasePatterns ++ llmHypotheses)
+
+  -- 3. Attempt formalization and proof
+  for c in candidates.take 10 do
+    match ← tryFormalize c with
+    | some def =>
+      match ← tryProve def with
+      | some proof =>
+        let factor ← quantify def
+        updateTracker (toProvenReduction def proof factor)
+      | none => requestHumanHelp c
+    | none => continue
+```
+
+### 5.7 Discovery Sources Summary
 
 | Source | Method | Examples |
 |--------|--------|----------|
