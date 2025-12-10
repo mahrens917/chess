@@ -1329,18 +1329,21 @@ theorem moveToSAN_unique (gs : GameState) (m1 m2 : Move) :
   by_cases h_castle : m1.isCastle
   · -- Case: Both are castling moves
     simp [h_castle] at heq
-    -- Castling moves to the same file must be identical
-    -- Both have the same castle status and target file
+    -- Castling SAN: "O-O" for kingside, "O-O-O" for queenside
+    -- Constraint: by fideLegal (Spec.lean:99), isCastle → piece.pieceType = King
+    -- Therefore: both m1 and m2 move the king
+    -- Since both have matching SAN and both are king moves:
+    -- - m1.toSq.fileNat determines the move uniquely
+    -- - If heq is true, both moves target same file (kingside or queenside)
+    -- - Kings can only castle once, so source is determined by color
     unfold MoveEquiv
-    constructor
-    · -- m1.piece = m2.piece: both castling pieces are kings
-      sorry -- Requires that castling moves always move the king
-    constructor
-    · -- m1.fromSq = m2.fromSq: determined by starting position
-      sorry -- King positions in castling
-    constructor
-    · -- m1.toSq = m2.toSq: determined by fileNat value
-      sorry -- Both have same fileNat → same toSq
+    repeat constructor
+    · -- m1.piece = m2.piece: both are kings by fideLegal constraint
+      sorry -- Extract: m1.isCastle ∧ fideLegal m1 → m1.piece.pieceType = King
+    · -- m1.fromSq = m2.fromSq: king position is determined by color
+      sorry -- King starting position (e1 for white, e8 for black) from color
+    · -- m1.toSq = m2.toSq: determined by fileNat which is determined by SAN string
+      sorry -- "O-O" → fileNat 6, "O-O-O" → fileNat 2; extract from heq
     repeat constructor <;> try rfl
 
   · -- Case: Neither are castling moves (or exactly one is, contradicting equality)
