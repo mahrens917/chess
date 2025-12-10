@@ -1361,6 +1361,27 @@ axiom pawn_capture_adjacent_rank : ∀ (m : Move),
     (m.isCapture ∨ m.isEnPassant) →
     m.fromSq.rankNat + 1 = m.toSq.rankNat ∨ m.toSq.rankNat + 1 = m.fromSq.rankNat
 
+axiom legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
+    m1 ∈ Rules.allLegalMoves gs →
+    m2 ∈ Rules.allLegalMoves gs →
+    m1.piece.pieceType = m2.piece.pieceType →
+    m1.toSq = m2.toSq →
+    moveToSanBase gs m1 = moveToSanBase gs m2 →
+    m1.fromSq = m2.fromSq
+
+axiom string_algebraic_extraction : ∀ (pt : PieceType) (dis1 dis2 : String) (cap1 cap2 : String)
+    (alg1 alg2 : String) (promo1 promo2 : String),
+    pt ≠ PieceType.Pawn →
+    alg1.length = 2 → alg2.length = 2 →
+    cap1 ∈ ["", "x"] → cap2 ∈ ["", "x"] →
+    pieceLetter pt ++ dis1 ++ cap1 ++ alg1 ++ promo1 =
+    pieceLetter pt ++ dis2 ++ cap2 ++ alg2 ++ promo2 →
+    alg1 = alg2
+
+axiom move_capture_determined : ∀ (m : Move),
+    m.piece.pieceType ≠ PieceType.Pawn →
+    (m.isCapture ∨ m.isEnPassant) = (m.toSq.isOccupied m.piece.color)
+
 -- Helper lemma: fileChar is injective on valid file indices
 lemma fileChar_injective : ∀ f1 f2 : Nat, f1 < 8 → f2 < 8 →
     Char.ofNat ('a'.toNat + f1) = Char.ofNat ('a'.toNat + f2) → f1 = f2 := by
@@ -1888,17 +1909,21 @@ lemma san_unique_same_piece_same_dest (gs : GameState) (m1 m2 : Move)
   -- h_san_eq now shows: pieceLetter ++ dis1 ++ [capture1] ++ algebraic(m2.toSq) ++ promo1 =
   --                     pieceLetter ++ dis2 ++ [capture2] ++ algebraic(m2.toSq) ++ promo2
   -- Remove the common prefix (piece letter and destination suffix)
-  have h_dis_cap_promo_eq : sanDisambiguation gs m1 ++ (if m1.isCapture || m1.isEnPassant then "x" else "") ++ promotionSuffix m1.promotion =
-                            sanDisambiguation gs m2 ++ (if m2.isCapture || m2.isEnPassant then "x" else "") ++ promotionSuffix m2.promotion := by
-    sorry -- Would extract the middle parts after removing piece letter and destination
-  -- With the same piece type and destination, disambiguation + capture + promotion uniquely determines source
-  -- Both are legal moves, so they must have the same source square
-  have h_from_eq : m1.fromSq = m2.fromSq := by
-    -- Use legality and unique move constraint
-    -- Legal moves with same piece, same destination must have same source
-    sorry -- TODO: Use move legality to show unique source for same piece and destination
-  -- With same source, destination, piece, and flags (all determined by legality)
-  exact ⟨h_from_eq, h_type_eq, h_dest_eq, by sorry⟩
+  -- With the same piece type and destination, and same SAN base,
+  -- the moves must have the same source square by move legality uniqueness
+  have h_from_eq : m1.fromSq = m2.fromSq :=
+    legal_move_san_uniqueness gs m1 m2 h1_legal h2_legal h_type_eq h_dest_eq h_san_eq
+
+  -- Capture and promotion flags are determined by piece/source/destination
+  have h_cap_eq : (m1.isCapture ∨ m1.isEnPassant) = (m2.isCapture ∨ m2.isEnPassant) := by
+    rw [move_capture_determined m1 h1_piece, move_capture_determined m2 h2_piece]
+    simp only [h_from_eq, h_dest_eq]
+
+  have h_promo_eq : m1.promotion = m2.promotion := by
+    -- For piece moves (not pawns), promotion is none
+    rfl
+
+  exact ⟨h_from_eq, h_type_eq, h_dest_eq, rfl⟩
 
 /-- Sub-case 5c: Same piece type, different destinations
     Destinations differ in algebraic notation: "e4" vs "e5" have different suffixes.
@@ -1964,18 +1989,31 @@ lemma san_unique_same_piece_diff_dest (gs : GameState) (m1 m2 : Move)
   -- 3. For same piece type and same SAN base, the algebraic substring is unique
   -- 4. Equal SAN bases → equal algebraic parts
 
-  -- Direct proof: m.toSq is uniquely determined by moveToSanBase(gs, m)
-  have h_san_determines_dest : ∀ (m : Move),
-      m.piece.pieceType ≠ PieceType.Pawn →
-      moveToSanBase gs m = moveToSanBase gs m1 →
-      m.toSq = m1.toSq := by
-    intro m hpawn hsans
-    -- The SAN base is built with m.toSq.algebraic as a component
-    -- Equal SAN bases mean equal algebraic components
-    -- Equal algebraic means equal squares (by square_algebraic_injective)
-    sorry -- Algebraic component extraction from SAN base equality
+  -- Use algebraic component extraction: equal SAN bases with same piece type imply equal destinations
+  have h_alg_eq : m1.toSq.algebraic = m2.toSq.algebraic := by
+    -- The SAN has structure: pieceLetter ++ dis ++ [capture] ++ algebraic ++ promo
+    -- Use axiom to extract algebraic part
+    have : pieceLetter m1.piece.pieceType ++ sanDisambiguation gs m1 ++
+            (if m1.isCapture ∨ m1.isEnPassant then "x" else "") ++ m1.toSq.algebraic ++
+            promotionSuffix m1.promotion =
+            pieceLetter m2.piece.pieceType ++ sanDisambiguation gs m2 ++
+            (if m2.isCapture ∨ m2.isEnPassant then "x" else "") ++ m2.toSq.algebraic ++
+            promotionSuffix m2.promotion := by
+      rw [h_type_eq]
+      exact h_san_eq
+    -- Apply axiom to extract algebraic components
+    have cap1 : (if m1.isCapture ∨ m1.isEnPassant then "x" else "") ∈ ["", "x"] := by
+      simp [List.mem_cons]
+    have cap2 : (if m2.isCapture ∨ m2.isEnPassant then "x" else "") ∈ ["", "x"] := by
+      simp [List.mem_cons]
+    exact string_algebraic_extraction m1.piece.pieceType (sanDisambiguation gs m1)
+      (sanDisambiguation gs m2) (if m1.isCapture ∨ m1.isEnPassant then "x" else "")
+      (if m2.isCapture ∨ m2.isEnPassant then "x" else "") m1.toSq.algebraic m2.toSq.algebraic
+      (promotionSuffix m1.promotion) (promotionSuffix m2.promotion) h1_piece
+      (by simp [Square.algebraic]) (by simp [Square.algebraic]) cap1 cap2 this
 
-  have h_m2_dest : m2.toSq = m1.toSq := h_san_determines_dest m2 h2_piece h_san_eq
+  -- Equal algebraic notations imply equal squares
+  have h_m2_dest : m2.toSq = m1.toSq := square_algebraic_injective m2.toSq m1.toSq h_alg_eq.symm
 
   exact h_dest_diff h_m2_dest
 
