@@ -1505,25 +1505,48 @@ lemma san_unique_both_pawn_captures (gs : GameState) (m1 m2 : Move)
     (h2_cap : m2.isCapture ∨ m2.isEnPassant)
     (h_san_eq : moveToSanBase gs m1 = moveToSanBase gs m2) :
     MoveEquiv m1 m2 := by
-  -- Both pawn captures: format is "file" + "x" + destination + [promotion]
-  -- String = file char + "x" + algebraic + promotion
+  -- Both pawn captures: format is "f" + "x" + "dest" + [promotion]
+  -- String structure: fileChar(m.fromSq) + "x" + algebraic(m.toSq) + promotionSuffix(m.promotion)
   simp only [moveToSanBase, h1_pawn, h2_pawn, ite_true] at h_san_eq
   simp only [h1_cap, h2_cap, ite_true] at h_san_eq
-  -- h_san_eq: String.singleton(m1.fromSq.fileChar) ++ "x" ++ algebraic(m1.toSq) ++ promotion =
-  --           String.singleton(m2.fromSq.fileChar) ++ "x" ++ algebraic(m2.toSq) ++ promotion
-  -- The first character is the source file, which determines fromSq
-  -- The rest follows the destination and promotion pattern
+  -- h_san_eq: fileChar(m1.fromSq) ++ "x" ++ algebraic(m1.toSq) ++ promo1 =
+  --           fileChar(m2.fromSq) ++ "x" ++ algebraic(m2.toSq) ++ promo2
+
+  -- Since all strings are built from the same components:
+  -- - First char is file (1 char)
+  -- - Then "x" (1 char)
+  -- - Then algebraic (2 chars)
+  -- - Then promotion (0-2 chars: "" or "=Q/=R/=B/=N")
+
+  -- For the strings to be equal, each component must be equal
   have h_file_eq : m1.fromSq.fileChar = m2.fromSq.fileChar := by
-    -- Both strings start with the file character, then "x"
-    -- If strings are equal, first chars must be equal
-    sorry -- TODO: Extract first character from both strings
+    -- First character of both sides must match
+    have : (String.singleton m1.fromSq.fileChar ++ "x" ++ m1.toSq.algebraic ++ promotionSuffix m1.promotion).get? 0 =
+            (String.singleton m2.fromSq.fileChar ++ "x" ++ m2.toSq.algebraic ++ promotionSuffix m2.promotion).get? 0 := by
+      rw [h_san_eq]
+    simp [String.singleton] at this
+    sorry -- Would need string indexing lemmas
+
   have h_dest_eq : m1.toSq.algebraic = m2.toSq.algebraic := by
-    -- After "file" + "x", the algebraic notation follows
-    sorry -- TODO: Extract destination from position 2..4
+    -- Characters at positions 2-3 (after "f" + "x")
+    sorry -- Would need substring extraction lemmas
+
   have h_promotion_eq : promotionSuffix m1.promotion = promotionSuffix m2.promotion := by
-    -- Promotion suffix is at the end after algebraic
-    sorry -- TODO: Extract suffix after position 4
-  exact ⟨by sorry, rfl, by sorry, by sorry⟩ -- TODO: Complete with extracted equalities
+    -- Characters after position 4
+    sorry -- Would need suffix extraction after algebraic
+
+  -- From file and same piece type (pawn), we can determine from square
+  have h_from_eq : m1.fromSq = m2.fromSq := by
+    -- Pawn file determines which file the pawn came from
+    ext
+    · -- fileNat
+      simp [Square.fileChar] at h_file_eq
+      sorry -- Need fileChar injectivity
+    · -- rankNat
+      -- Source rank depends on capture direction (always 1 away)
+      sorry -- Pawn can only capture diagonally
+
+  exact ⟨h_from_eq, rfl, by sorry, by sorry⟩
 
 /-- Sub-case 3c: One pawn is advance, other is capture
     Formats differ: "e4" vs "exd4" (presence of 'x')
