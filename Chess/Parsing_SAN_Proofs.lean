@@ -51,15 +51,40 @@ theorem moveFromSAN_preserves_move_structure (gs : GameState) (san : String) (m 
      gs.board m.fromSq = some m.piece ∧
      m.fromSq ≠ m.toSq) := by
   intro hparse
-  -- moveFromSAN calls moveFromSanToken after parsing
+  -- moveFromSAN = parseSanToken >>= moveFromSanToken
   unfold moveFromSAN at hparse
-  -- moveFromSanToken filters allLegalMoves
-  -- Every move in allLegalMoves satisfies:
-  -- - turnMatches (piece color matches gs.toMove)
-  -- - originHasPiece (board has piece at fromSq)
-  -- - squaresDiffer (fromSq ≠ toSq)
-  -- These are enforced by basicMoveLegalBool in the legal move generation
-  sorry
+  -- We need to unpack the bind chain to get m from moveFromSanToken
+  simp only [Except.bind] at hparse
+  -- parseSanToken either succeeds with a token or fails
+  split at hparse
+  · rename_i token htoken
+    simp only [Except.bind] at hparse
+    -- Now hparse : moveFromSanToken gs token = Except.ok m
+    -- moveFromSanToken finds a move in allLegalMoves that matches the SAN
+    unfold moveFromSanToken at hparse
+    simp only [Except.bind, Except.pure] at hparse
+    -- moveFromSanToken filters allLegalMoves to find matching moves
+    split at hparse
+    · rename_i moves hmoves_ok
+      simp only [Except.bind] at hparse
+      -- Verify the move is in allLegalMoves
+      have hmem : m ∈ allLegalMoves gs := by
+        -- The move was selected from allLegalMoves by the filter
+        sorry -- Extract from filter membership
+      -- allLegalMoves only contains moves that satisfy basic legality
+      -- which includes: color matches, piece exists at fromSq, squares differ
+      constructor
+      · -- m.piece.color = gs.toMove: from allLegalMoves membership
+        sorry -- From basicMoveLegalBool which checks turnMatches
+      constructor
+      · -- gs.board m.fromSq = some m.piece: from allLegalMoves membership
+        sorry -- From basicMoveLegalBool which checks originHasPiece
+      · -- m.fromSq ≠ m.toSq: from allLegalMoves membership
+        sorry -- From basicMoveLegalBool which checks squaresDiffer
+    · -- Case: move not found or error - contradicts hparse
+      simp at hparse
+  · -- Case: parseSanToken failed - contradicts hparse
+    simp at hparse
 
 -- Theorem: Castling SAN strings are normalized
 theorem parseSanToken_normalizes_castling (token : String) :

@@ -173,14 +173,30 @@ theorem algebraic_uniqueness (gs : GameState) (m₁ m₂ : Move) :
     m₁.toSq.algebraic = m₂.toSq.algebraic →
     m₁ = m₂ := by
   intro _ _ _
-  -- This theorem is FALSE as stated. Counter-example:
-  -- Position where two knights (or other pieces) can both move to the same square.
-  -- Proper SAN includes disambiguation (e.g., "Nbd7" vs "Nfd7" for knights).
+  -- ⚠️ ARCHITECTURAL ISSUE: This theorem is PROVABLY FALSE ⚠️
   --
-  -- For a correct version, we would need:
-  -- 1. Full SAN generation with disambiguation (from Chess/Parsing.lean)
-  -- 2. Proof that full SAN is injective for legal moves
-  -- 3. Use that to show: fullSAN m₁ = fullSAN m₂ → m₁ = m₂
+  -- COUNTER-EXAMPLE: Two knights can move to the same square
+  -- - m₁ = {fromSq: g3, toSq: e4, piece: ♘, ...}
+  -- - m₂ = {fromSq: f5, toSq: e4, piece: ♘, ...}
+  -- Both: m₁.toSq.algebraic = m₂.toSq.algebraic = "e4"
+  -- But:  m₁ ≠ m₂
+  --
+  -- ROOT CAUSE: The perft proof (lines 405-422) uses m.toSq.algebraic as the
+  -- SAN trace representation, but square names don't uniquely identify moves.
+  --
+  -- REQUIRED ARCHITECTURAL FIX:
+  -- 1. Change GameLine.toSANTrace to use moveToSAN(gs, m) instead of m.toSq.algebraic
+  --    → moveToSAN includes piece type + disambiguation + target
+  --    → Full SAN uniquely identifies moves (see Chess/Parsing.lean:1313)
+  --
+  -- 2. Update gameLine_san_injective_cons proof (lines 405-422)
+  --    → Use moveToSAN_unique (ParsingProofs.lean:1313) instead of this false theorem
+  --    → Proof becomes: if moveToSAN(m₁) = moveToSAN(m₂) then m₁ ≈ m₂
+  --
+  -- 3. Refactor all perft bijection proofs that depend on square-based SAN
+  --
+  -- This fix enables Phases 3-4 of sorry elimination.
+  -- Marking as sorry (not axiom) to indicate this is a hard error, not a deep theory limitation.
   sorry
 
 /-- The perft function's recursive structure via foldl correctly computes the sum

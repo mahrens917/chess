@@ -1316,15 +1316,75 @@ theorem moveToSAN_unique (gs : GameState) (m1 m2 : Move) :
     moveToSanBase gs m1 = moveToSanBase gs m2 →
     MoveEquiv m1 m2 := by
   intro h1 h2 heq
-  -- sanDisambiguation adds file/rank/both to distinguish moves
-  -- If two moves have the same moveToSanBase, they must:
-  -- 1. Have the same piece type and color (from pieceLetter)
-  -- 2. Have the same target square (from toSq.algebraic)
-  -- 3. Have the same disambiguation (file, rank, or both)
-  -- 4. Have the same capture status and promotion
+  -- moveToSanBase produces strings based on move structure:
+  -- - Castling: "O-O" or "O-O-O" (determined by toSq.fileNat)
+  -- - Pawns: [source file if capture] + [x if capture] + target + [promotion]
+  -- - Others: piece + disambiguation + [x if capture] + target + [promotion]
   --
-  -- These together imply Move equivalence
-  sorry -- Requires detailed analysis of moveToSanBase structure
+  -- If m1 and m2 have the same moveToSanBase, then:
+  unfold moveToSanBase at heq
+  -- They enter the same branch of the if-cascade
+
+  -- We analyze by cases on m1's type
+  by_cases h_castle : m1.isCastle
+  · -- Case: Both are castling moves
+    simp [h_castle] at heq
+    -- Castling moves to the same file must be identical
+    -- Both have the same castle status and target file
+    unfold MoveEquiv
+    constructor
+    · -- m1.piece = m2.piece: both castling pieces are kings
+      sorry -- Requires that castling moves always move the king
+    constructor
+    · -- m1.fromSq = m2.fromSq: determined by starting position
+      sorry -- King positions in castling
+    constructor
+    · -- m1.toSq = m2.toSq: determined by fileNat value
+      sorry -- Both have same fileNat → same toSq
+    repeat constructor <;> try rfl
+
+  · -- Case: Neither are castling moves (or exactly one is, contradicting equality)
+    simp [h_castle] at heq
+    by_cases h_pawn : m1.piece.pieceType = PieceType.Pawn
+
+    · -- Case: Pawn moves
+      simp [h_pawn] at heq
+      -- Pawn SAN: [file if capture] + [x if capture] + target + [promotion]
+      -- If two pawns have same SAN base, they:
+      -- - Have same capture status (from presence of 'x')
+      -- - Have same target square (from target)
+      -- - Have same promotion (from promotion)
+      -- - Must be moving from same source (pawn geometry)
+      unfold MoveEquiv
+      repeat constructor
+      · -- Piece is same (both pawns)
+        rfl
+      · -- fromSq is same: pawn moves to same target with same capture must originate from same source
+        sorry -- Pawn move geometry determines fromSq from toSq and capture
+      · sorry -- Target square from string
+      · sorry -- Capture status from 'x'
+      · sorry -- Promotion from string
+      · rfl -- isCastle
+      · rfl -- isEnPassant
+
+    · -- Case: Other pieces (Queen, Rook, Bishop, Knight, King)
+      simp [h_pawn] at heq
+      -- Non-pawn, non-castle SAN: piece + disambiguation + [x if capture] + target + [promotion]
+      -- The key: sanDisambiguation uniquely identifies among pieces with same type/color/target
+      unfold MoveEquiv
+      repeat constructor
+      · -- m1.piece = m2.piece: same piece (from string parsing)
+        sorry -- pieceLetter is injective
+      · -- m1.fromSq = m2.fromSq: determined by sanDisambiguation
+        -- sanDisambiguation filters peers by (piece type, color, target square)
+        -- and adds file/rank disambiguation to distinguish them
+        -- So if disambiguation is the same, fromSq must be the same
+        sorry -- sanDisambiguation uniqueness ensures fromSq
+      · sorry -- toSq from string
+      · sorry -- isCapture from 'x'
+      · sorry -- promotion from string
+      · exact h_castle -- isCastle = false
+      · rfl -- isEnPassant
 
 -- Theorem: Disambiguation is minimal and sufficient
 -- Proof strategy: sanDisambiguation (lines 298-314) uses minimal info.
