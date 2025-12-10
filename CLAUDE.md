@@ -15,3 +15,4 @@
 
 ## MCP Integration
 - Reach for the `solve` MCP server as soon as a subgoal devolves into symbolic grind (arithmetic rewrites, case splits, etc.). Offload the goal snippet plus hypotheses, reuse the returned Lean derivation verbatim when possible, and cite `solve` in comments if it guided the final script so other contributors can replay the tactic-free proof. Defaulting to `solve` on algebra-heavy subgoals usually slashes token usage compared to inline back-and-forth.
+- Do NOT disable tests, leave them broken until they are fixed, they should be visible!

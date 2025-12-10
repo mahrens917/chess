@@ -414,6 +414,9 @@ def moveFromSAN (gs : GameState) (token : String) : Except String Move := do
   moveFromSanToken gs parsed
 
 def applySAN (gs : GameState) (token : String) : Except String GameState := do
+  -- Reject moves if the game has ended
+  if gs.result.isSome then
+    throw "Cannot play moves after game has ended"
   let m ← moveFromSAN gs token
   applyLegalMove gs m
 

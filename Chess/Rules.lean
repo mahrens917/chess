@@ -30,9 +30,13 @@ def destinationFriendlyFreeProp (gs : GameState) (m : Move) : Prop :=
   destinationFriendlyFree gs m = true
 
 def captureFlagConsistent (gs : GameState) (m : Move) : Bool :=
-  match gs.board m.toSq with
-  | some _ => m.isCapture
-  | none => ¬ m.isCapture
+  -- En passant moves are captures on empty target squares
+  if m.isEnPassant then
+    m.isCapture
+  else
+    match gs.board m.toSq with
+    | some _ => m.isCapture
+    | none => ¬ m.isCapture
 
 def squaresDiffer (m : Move) : Bool :=
   m.fromSq ≠ m.toSq
