@@ -1341,13 +1341,95 @@ lemma castle_destination_determines_side (file : Nat) (h : file < 8) :
 
     For now: Marked as requiring character library support.
 -/
+-- Helper lemma: fileChar is injective on valid file indices
+lemma fileChar_injective : ∀ f1 f2 : Nat, f1 < 8 → f2 < 8 →
+    Char.ofNat ('a'.toNat + f1) = Char.ofNat ('a'.toNat + f2) → f1 = f2 := by
+  intro f1 f2 _ _ h
+  -- Char.ofNat is defined as a constructor with injective val field
+  -- If Char.ofNat a = Char.ofNat b, then they have same val
+  have : ('a'.toNat + f1) = ('a'.toNat + f2) := by
+    -- Extract the internal Nat from Char equality
+    have : (Char.ofNat ('a'.toNat + f1)).val = (Char.ofNat ('a'.toNat + f2)).val := by
+      rw [h]
+    -- Char.ofNat wraps the value: (Char.ofNat n).val = n
+    simp [Char.ofNat, Char.mk] at this
+    omega
+  omega
+
+-- Helper lemma: rankChar is injective on valid rank indices
+lemma rankChar_injective : ∀ r1 r2 : Nat, r1 < 8 → r2 < 8 →
+    Char.ofNat ('1'.toNat + r1) = Char.ofNat ('1'.toNat + r2) → r1 = r2 := by
+  intro r1 r2 _ _ h
+  -- Same approach: extract underlying Nat from Char equality
+  have : ('1'.toNat + r1) = ('1'.toNat + r2) := by
+    -- Extract the internal Nat from Char equality
+    have : (Char.ofNat ('1'.toNat + r1)).val = (Char.ofNat ('1'.toNat + r2)).val := by
+      rw [h]
+    -- Char.ofNat wraps the value: (Char.ofNat n).val = n
+    simp [Char.ofNat, Char.mk] at this
+    omega
+  omega
+
 lemma square_algebraic_injective : ∀ sq1 sq2 : Square,
     sq1.algebraic = sq2.algebraic → sq1 = sq2 := by
   intro sq1 sq2 h
-  -- Both squares encode to unique 2-character strings (file + rank)
-  -- fileChar and rankChar are deterministic character encodings
-  -- Equal strings ⇒ equal files and ranks ⇒ equal squares
-  sorry -- Requires: Char.ofNat injectivity for limited ranges [0,8) → [a,h] and [1,8]
+  -- algebraic = fileChar.toString ++ toString (rankNat + 1)
+  -- This is a 2-4 character string: 1 file char + 1-2 rank chars
+
+  ext <;> simp only [Square.algebraic] at h
+  · -- fileNat equality
+    -- Extract first character of algebraic string
+    -- If strings equal, fileChars are equal
+    have fileChars_eq : sq1.fileChar = sq2.fileChar := by
+      -- Both algebraic strings: c.toString ++ rankString
+      -- First character of concatenation is the file char
+      have eq_full : sq1.fileChar.toString ++ String.toString (sq1.rankNat + 1) =
+                     sq2.fileChar.toString ++ String.toString (sq2.rankNat + 1) := h
+      -- fileChar.toString is a single character string
+      -- So the first character of both sides must be equal
+      have len1 : (sq1.fileChar.toString).length = 1 := by simp [String.length]
+      have len2 : (sq2.fileChar.toString).length = 1 := by simp [String.length]
+      -- Extract first character: must be equal in both
+      have first_eq : (sq1.fileChar.toString).get 0 = (sq2.fileChar.toString).get 0 := by
+        have : (sq1.fileChar.toString ++ String.toString (sq1.rankNat + 1)).get 0 =
+                (sq2.fileChar.toString ++ String.toString (sq2.rankNat + 1)).get 0 := by
+          rw [eq_full]
+        simp [String.get_concat, len1] at this
+        exact this
+      -- Reconstruct fileChar from position 0
+      unfold Char.toString at first_eq
+      simp at first_eq
+      exact first_eq
+    -- fileChar injectivity
+    have : sq1.fileNat = sq2.fileNat := by
+      have hf1 : sq1.fileNat < 8 := sq1.file.isLt
+      have hf2 : sq2.fileNat < 8 := sq2.file.isLt
+      unfold Square.fileChar at fileChars_eq
+      exact fileChar_injective sq1.fileNat sq2.fileNat hf1 hf2 fileChars_eq
+    exact Fin.ext this
+
+  · -- rankNat equality
+    -- Extract rank information from algebraic string
+    -- After the first character, we have toString (rankNat + 1)
+    have rankStrs_eq : String.toString (sq1.rankNat + 1) = String.toString (sq2.rankNat + 1) := by
+      -- Remove first character from both sides
+      have eq_full : sq1.fileChar.toString ++ String.toString (sq1.rankNat + 1) =
+                     sq2.fileChar.toString ++ String.toString (sq2.rankNat + 1) := h
+      -- fileChar.toString has length 1
+      have len1 : (sq1.fileChar.toString).length = 1 := by simp [String.length]
+      have len2 : (sq2.fileChar.toString).length = 1 := by simp [String.length]
+      -- Drop first character from both sides
+      have dropped : (sq1.fileChar.toString ++ String.toString (sq1.rankNat + 1)).drop 1 =
+                     (sq2.fileChar.toString ++ String.toString (sq2.rankNat + 1)).drop 1 := by
+        rw [eq_full]
+      -- After dropping first character, we get the rank string
+      simp [String.drop_concat, len1, len2] at dropped
+      exact dropped
+    -- Parse rank number back
+    have : sq1.rankNat + 1 = sq2.rankNat + 1 := by
+      -- toString is injective on Nat
+      exact Nat.toString_inj.mp rankStrs_eq
+    omega
 
 /-- Helper: Promotion suffix uniquely encodes promotion piece type -/
 lemma promotionSuffix_injective : ∀ p1 p2 : Option PieceType,
@@ -1784,12 +1866,38 @@ lemma san_unique_same_piece_diff_dest (gs : GameState) (m1 m2 : Move)
     -- But we know they're different
     exact h_dest_diff this
 
-  -- Now: the SAN strings contain these algebraic parts at a fixed position
-  -- String composition injectivity: if full strings are equal but components differ,
-  -- we have a contradiction
-  -- (The algebraic notation is part of the concatenated SAN string:
-  --  pieceLetter ++ disambiguation ++ capture? ++ algebraic ++ promotion?)
-  sorry -- String composition injectivity: equal strings ⇒ equal components
+  -- Now derive a contradiction from h_san_eq
+  -- Key insight: moveToSanBase encodes the destination as m.toSq.algebraic
+  -- If the full SAN bases are equal, then the algebraic parts must appear
+  -- at the same position and be equal
+
+  -- The algebraic notation always appears as a fixed 2-character substring
+  -- We can extract it from the SAN base by looking for the 2-char algebraic format
+
+  -- Since m1.toSq.algebraic appears in the full SAN base, and m2.toSq.algebraic
+  -- appears in the full SAN base, and the full SAN bases are equal...
+  -- the algebraic parts must be equal
+
+  -- This is true because:
+  -- 1. Square algebraic is always exactly 2 chars: file char ('a'-'h') + rank char ('1'-'8')
+  -- 2. These characters appear as a contiguous substring in the SAN base
+  -- 3. For same piece type and same SAN base, the algebraic substring is unique
+  -- 4. Equal SAN bases → equal algebraic parts
+
+  -- Direct proof: m.toSq is uniquely determined by moveToSanBase(gs, m)
+  have h_san_determines_dest : ∀ (m : Move),
+      m.piece.pieceType ≠ PieceType.Pawn →
+      moveToSanBase gs m = moveToSanBase gs m1 →
+      m.toSq = m1.toSq := by
+    intro m hpawn hsans
+    -- The SAN base is built with m.toSq.algebraic as a component
+    -- Equal SAN bases mean equal algebraic components
+    -- Equal algebraic means equal squares (by square_algebraic_injective)
+    sorry -- Algebraic component extraction from SAN base equality
+
+  have h_m2_dest : m2.toSq = m1.toSq := h_san_determines_dest m2 h2_piece h_san_eq
+
+  exact h_dest_diff h_m2_dest
 
 -- ============================================================================
 -- MAIN THEOREM: SAN UNIQUE
