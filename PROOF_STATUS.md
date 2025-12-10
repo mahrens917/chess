@@ -1,6 +1,6 @@
 # Proof Status Tracker
 
-**Last Updated:** 2025-12-09
+**Last Updated:** 2025-12-10 (Session 1 Progress)
 **Verification Command:** `grep -rn "sorry$" Chess/*.lean | wc -l`
 
 ## Current Metrics
@@ -159,6 +159,53 @@ To maintain this:
 - `lake build` after every sorry elimination
 - `lake test` after every phase
 - `lake exe slowTests` before committing changes
+
+---
+
+## Session 1 Summary (2025-12-10)
+
+**Effort**: 4 hours | **Sorries Eliminated**: 2 | **New Insights**: 1 major architectural issue
+
+### Accomplishments
+1. **Documentation Accuracy** (Phase 0 Track A)
+   - Created PROOF_STATUS.md (single source of truth)
+   - Fixed PLAN.md inaccuracies (0 → 10 sorries, axioms removed)
+   - Added proof status table to README.md
+
+2. **Quick-Win Sorries** (Phase 0 Track C) - 2 eliminated ✓
+   - `sanDisambiguation_minimal` (ParsingProofs.lean:1355)
+     - Case analysis on if-then-else definition
+     - Shows minimal disambiguation uses ≤2 characters
+   - `parseSanToken_normalizes_castling` (Parsing_SAN_Proofs.lean:74)
+     - Proved String.map removes all '0' characters
+     - Induction on character list
+
+3. **Architectural Analysis** (Phase 1)
+   - Discovered `algebraic_uniqueness` is PROVABLY FALSE
+   - Root cause: perft proof uses square names instead of full SAN
+   - Multiple pieces can reach same square → square ≠ unique move identifier
+   - Created detailed documentation of required architectural fix
+   - Identified perft track (5 sorries) requires major refactoring
+
+### Key Finding: Perft Track is Blocked
+The false `algebraic_uniqueness` theorem blocks the entire perft track (5 sorries).
+Fix requires refactoring GameLine.toSANTrace from `m.toSq.algebraic` to `moveToSAN(gs, m)`.
+**Recommendation**: Focus on independent sorries instead (parser + pawn = 4 sorries).
+
+### Proof Structures Started
+- `moveToSAN_unique` (ParsingProofs.lean:1313) - case analysis framework complete
+- `moveFromSAN_preserves_move_structure` (Parsing_SAN_Proofs.lean:62) - pipeline tracing
+
+### Next Session Priorities
+1. **Pawn Move Generation** (Spec.lean:1678, 1701) - 2-4 hours
+   - Independent from perft track
+   - Unlocks complete move generation proof
+
+2. **Parser Round-Trips** (Parsing_SAN_Proofs.lean:45, 62) - 4-6 hours
+   - Requires completing moveToSAN_unique first
+   - Flesh out string parsing details
+
+3. **Defer**: Perft track until architectural refactoring planned
 
 ---
 
