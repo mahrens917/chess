@@ -405,6 +405,7 @@ def runDrawStatusTests : IO Unit := do
   expectBool "75-move reason tagged" (autoReasons.any (· = "75-move")) true
 
 unsafe def runAllTests : IO Unit := do
+  IO.println "[Suites] Running fast suites"
   runSuite "Target counts" testTargetCounts
   runSuite "Basic move updates" runMoveTests
   runSuite "Rule helpers" runRuleTests
@@ -418,12 +419,8 @@ unsafe def runAllTests : IO Unit := do
   runSuite "Endgame conditions" runEndgameTests
   runSuite "Perft smoke" runPerftTests
   runSuite "Draw status" runDrawStatusTests
-  let slow ← shouldRunSlowTests
-  if slow then
-    runSuite "Edge-case perft" runEdgePerftTests
-  else
-    IO.println "Skipping slow edge-case perft suite (set RUN_SLOW_TESTS=1 to include it)"
-  IO.println s!"All chess tests completed successfully"
+  IO.println ""
+  IO.println "[Suites] All tests completed successfully!"
   pure ()
 
 namespace Test

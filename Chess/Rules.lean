@@ -334,21 +334,28 @@ def respectsPin (pins : List (Square × Square)) (m : Move) : Bool :=
       fd = 0 ∨ rd = 0 ∨ fd = rd
   | none => true
 
-def legalMovesFor (gs : GameState) (sq : Square) : List Move :=
+-- Internal version that takes pre-computed pins (avoids recomputing 64 times)
+def legalMovesForCached (gs : GameState) (sq : Square) (pins : List (Square × Square)) : List Move :=
   match gs.board sq with
   | none => []
   | some p =>
       if p.color ≠ gs.toMove then
         []
       else
-        let pins := pinnedSquares gs gs.toMove
         pieceTargets gs sq p
           |>.filter (fun m => respectsPin pins m)
           |>.filter (fun m => basicLegalAndSafe gs m)
 
+-- Public interface with caching
+def legalMovesFor (gs : GameState) (sq : Square) : List Move :=
+  let pins := pinnedSquares gs gs.toMove
+  legalMovesForCached gs sq pins
+
+-- Cache pinnedSquares once and reuse across all squares
 def allLegalMoves (gs : GameState) : List Move :=
+  let pins := pinnedSquares gs gs.toMove
   allSquares.foldr
-    (fun sq acc => legalMovesFor gs sq ++ acc)
+    (fun sq acc => legalMovesForCached gs sq pins ++ acc)
     []
 
 def GameState.legalMoves (gs : GameState) : List Move :=
@@ -516,7 +523,9 @@ def finalizeResult (before : GameState) (after : GameState) : GameState :=
   else after
 
 def GameState.playMove (gs : GameState) (m : Move) : GameState :=
-  finalizeResult gs (gs.movePiece m)
+  let afterMove := gs.movePiece m
+  let withSnapshot := { afterMove with history := gs.history ++ [positionSnapshot afterMove] }
+  finalizeResult gs withSnapshot
 
 def applyLegalMove? (gs : GameState) (m : Move) : Option GameState :=
   if isLegalMove gs m then

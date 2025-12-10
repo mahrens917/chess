@@ -128,7 +128,7 @@ def parseNatField (s : String) (label : String) : Except String Nat :=
   | some n => return n
   | none => throw s!"Invalid number for {label}: {s}"
 
-def validateFEN (board : Board) (toMove : Color) (cr : CastlingRights) (ep : Option Square) : Except String Unit := do
+def validateFEN (board : Board) (toMove : Color) (cr : CastlingRights) (ep : Option Square) (halfMoveClock : Nat := 0) : Except String Unit := do
   let pieces := allSquares.filterMap fun sq =>
     match board sq with
     | some p => some (sq, p)
@@ -172,6 +172,8 @@ def validateFEN (board : Board) (toMove : Color) (cr : CastlingRights) (ep : Opt
   castlingSquaresValid Color.Black false
   match ep with
   | some sq =>
+      if halfMoveClock ≠ 0 then
+        throw "En passant square requires half-move clock reset"
       let expectedRank := if toMove = Color.White then 5 else 2
       if sq.rankNat ≠ expectedRank then
         throw "En passant square rank inconsistent with side to move"
@@ -228,14 +230,15 @@ def parseFEN (fen : String) : Except String GameState := do
       let halfMoveClock ← parseNatField half "half-move clock"
       let fullMoveNumber ← parseNatField full "full-move number"
       let castlingRights := parseCastlingRights castling
-      validateFEN board toMove castlingRights enPassant
-      return { board := board
-               toMove := toMove
-               halfMoveClock := halfMoveClock
-               fullMoveNumber := fullMoveNumber
-               enPassantTarget := enPassant
-               castlingRights := castlingRights
-               history := [] }
+      validateFEN board toMove castlingRights enPassant halfMoveClock
+      let gs := { board := board
+                  toMove := toMove
+                  halfMoveClock := halfMoveClock
+                  fullMoveNumber := fullMoveNumber
+                  enPassantTarget := enPassant
+                  castlingRights := castlingRights
+                  history := [] }
+      return seedHistory gs
   | _ => throw s!"Invalid FEN field count: {fen}"
 
 def rankToFen (board : Board) (rank : Nat) : String :=
@@ -492,7 +495,7 @@ def collectSanWithNags (tokens : List String) : Except String (List SanToken) :=
 def startFromTags (tags : List (String × String)) : Except String GameState :=
   match tags.find? (fun t => t.fst = "FEN") with
   | some (_, fen) => parseFEN fen
-  | none => pure standardGameState
+  | none => pure (seedHistory standardGameState)
 
 def playPGNStructured (pgn : String) : Except String PGNGame := do
   let tags := parseTags pgn

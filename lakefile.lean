@@ -22,5 +22,5 @@ lean_exe «slowTests» {
 
 @[test_driver]
 lean_exe «test» {
-  root := `Test.Main
+  root := `Test.Runner
 }
