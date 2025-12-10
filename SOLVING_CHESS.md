@@ -278,238 +278,99 @@ def runReductionPipeline : SearchSpaceTracker :=
 
 ### 5.2 Idea Generation Sources
 
-| Source | Method | Automation | Status |
-|--------|--------|------------|--------|
-| **Game Database Mining** | Analyze billions of existing games | Automated | **Not Implemented** |
-| **Tablebase Mining** | Analyze solved positions for patterns | Automated | **Not Implemented** |
-| **LLM Hypothesis** | Ask LLM to propose reductions | Interactive | **This conversation!** |
-| **Human Expert** | Chess/math expert proposes ideas | Manual | **Current method** |
-| **Literature** | Scan papers for reduction techniques | Semi-auto | **Not Implemented** |
+**CRITICAL: Our only goal is finding PROOFS that reduce search space.**
 
-### 5.3 How Each Source Would Work
+Game analysis, statistics, and correlations are NOT the goal. They are only useful as hypothesis generators for things we can then PROVE in Lean.
 
-#### Source A: Game Database Mining (BEST APPROACH)
+| Source | Purpose | Output |
+|--------|---------|--------|
+| **Game Database** | Find patterns to try to prove | Hypotheses for Lean proofs |
+| **Tablebase** | Find exact conditions for draws | Theorems about endgames |
+| **LLM + Human** | Propose provable properties | Lean definitions + proofs |
 
-**Why this is better than self-play:**
-- Billions of games already exist with known outcomes
-- Includes diverse positions from human + engine play
-- No compute cost to generate games
-- Can filter by Elo, time control, outcome
+**What we care about:**
+- "This pattern ALWAYS draws" → Prove it → Reduction
+- "This equivalence PRESERVES game value" → Prove it → Reduction
 
-**Available Databases:**
-| Database | Games | Size | Access |
-|----------|-------|------|--------|
-| Lichess | 4+ billion | ~500 GB | Free (open data) |
-| Chess.com | 1+ billion | Unknown | API available |
-| FICS | 800+ million | ~100 GB | Free |
-| CCRL (engine games) | 2+ million | ~5 GB | Free |
-| TCEC | 100K+ | ~1 GB | Free |
+**What we DON'T care about:**
+- "99% of games with X are draws" → Statistical, not a proof
+- "These positions usually behave similarly" → Correlation, not equivalence
 
-**Mining Pipeline:**
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    GAME DATABASE MINING                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐                                                │
-│  │ Lichess DB   │──┐                                             │
-│  │ (4B games)   │  │                                             │
-│  └──────────────┘  │     ┌─────────────┐     ┌──────────────┐   │
-│  ┌──────────────┐  ├────▶│   Filter    │────▶│   Extract    │   │
-│  │ Chess.com    │──┤     │  by Outcome │     │   Features   │   │
-│  │ (1B games)   │  │     └─────────────┘     └──────┬───────┘   │
-│  └──────────────┘  │                                │            │
-│  ┌──────────────┐  │                                ▼            │
-│  │ CCRL Engines │──┘     ┌─────────────────────────────────┐    │
-│  │ (2M games)   │        │        Feature Clusters          │    │
-│  └──────────────┘        │  • Pawn structure hash           │    │
-│                          │  • Material signature            │    │
-│                          │  • King safety score             │    │
-│                          │  • Piece mobility                │    │
-│                          │  • Control of center             │    │
-│                          └─────────────┬───────────────────┘    │
-│                                        │                         │
-│                                        ▼                         │
-│                          ┌─────────────────────────────────┐    │
-│                          │    Correlation Analysis          │    │
-│                          │  Feature X → 95% draws?          │    │
-│                          │  Feature Y → 80% white wins?     │    │
-│                          └─────────────┬───────────────────┘    │
-│                                        │                         │
-│                                        ▼                         │
-│                          ┌─────────────────────────────────┐    │
-│                          │    Candidate Reductions          │    │
-│                          │  "Blocked center → 90% draw"     │    │
-│                          │  "OCB + no pawns → 99% draw"     │    │
-│                          └─────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Concrete Algorithm:**
-```python
-# Pseudocode for game database mining
-def mine_reductions(database_path):
-    # 1. Load games and extract final positions
-    positions = []
-    for game in load_pgn(database_path):
-        final_pos = game.end_position()
-        outcome = game.result  # "1-0", "0-1", "1/2-1/2"
-        positions.append((final_pos, outcome))
-
-    # 2. Extract features from each position
-    features = []
-    for pos, outcome in positions:
-        f = {
-            'pawn_hash': hash_pawn_structure(pos),
-            'material': material_signature(pos),
-            'blocked_center': is_center_blocked(pos),
-            'ocb': has_opposite_color_bishops(pos),
-            'king_safety': king_safety_score(pos),
-            'mobility': total_mobility(pos),
-            ...
-        }
-        features.append((f, outcome))
-
-    # 3. Find features that strongly correlate with outcome
-    candidates = []
-    for feature_name in FEATURE_NAMES:
-        # Group positions by feature value
-        by_value = group_by(features, feature_name)
-        for value, group in by_value.items():
-            draw_rate = count(group, outcome="1/2-1/2") / len(group)
-            if draw_rate > 0.95:
-                candidates.append({
-                    'name': f'{feature_name}={value}',
-                    'draw_rate': draw_rate,
-                    'sample_size': len(group),
-                    'hypothesis': f'Positions with {feature_name}={value} are drawn'
-                })
-
-    # 4. Rank by statistical significance
-    return sorted(candidates, key=lambda c: c['draw_rate'] * log(c['sample_size']))
-```
-
-**Example Discoveries from Game Analysis:**
-| Pattern Found | Draw Rate | Sample Size | Reduction Candidate |
-|--------------|-----------|-------------|---------------------|
-| OCB, no pawns | 99.2% | 50,000 | Opposite-color bishop draw |
-| Blocked d/e pawns | 94.1% | 200,000 | Blocked center reduction |
-| K+R vs K+R, same file pawns | 97.8% | 30,000 | Rook endgame fortress |
-| Material = 0, no passed pawns | 99.5% | 100,000 | Symmetric pawn draw |
-
-#### Source B: Stockfish Evaluation Mining
-
-Instead of playing games, we can use Stockfish to **evaluate positions**:
-
-```
-For each position in database:
-  1. Get Stockfish eval at depth 30+
-  2. If |eval| < 0.2 → likely draw
-  3. Cluster "likely draw" positions by features
-  4. Find common patterns → Candidate reductions
-```
-
-**Advantage**: Engine evaluation is more reliable than game outcomes (humans blunder)
-
-#### Source C: Tablebase Mining
-
-**7-piece tablebases contain exact game-theoretic values for 549 billion positions.**
+### 5.3 How Game Data Helps (Hypothesis Generation Only)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    TABLEBASE MINING                              │
+│                    GAME DATA → HYPOTHESES → PROOFS              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  Syzygy 7-piece TB (549B positions)                             │
-│         │                                                        │
-│         ▼                                                        │
+│  Game Database                                                   │
+│       │                                                          │
+│       ▼                                                          │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Group by: material signature + outcome                  │    │
+│  │  Find patterns where outcome is ALWAYS the same:         │    │
 │  │                                                          │    │
-│  │  KRPvKR: 70% draw, 20% white wins, 10% black wins       │    │
-│  │  KBPvKN: 60% draw, 25% white wins, 15% black wins       │    │
-│  │  KQvKRP: 85% queen wins                                  │    │
+│  │  • K+B vs K (light sq) → 100% draw (all 28K positions)  │    │
+│  │  • OCB, no pawns → 100% draw (50K positions)            │    │
+│  │  • Specific fortress pattern → 100% draw                 │    │
 │  └─────────────────────────────────────────────────────────┘    │
-│         │                                                        │
-│         ▼                                                        │
+│       │                                                          │
+│       ▼                                                          │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │  For high-draw materials, find WHAT makes it draw:       │    │
+│  │  HYPOTHESIS: "Pattern X always results in draw"          │    │
 │  │                                                          │    │
-│  │  KRPvKR draws when:                                      │    │
-│  │    - Rook pawn (a/h file) + wrong-side king             │    │
-│  │    - Philidor position (rank 6 defense)                  │    │
-│  │    - Lucena NOT achievable                               │    │
+│  │  This is NOT a reduction yet - it's a conjecture!       │    │
 │  └─────────────────────────────────────────────────────────┘    │
-│         │                                                        │
-│         ▼                                                        │
+│       │                                                          │
+│       ▼                                                          │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Generalize to 8+ pieces:                                │    │
+│  │  PROVE in Lean:                                          │    │
 │  │                                                          │    │
-│  │  "If position reduces to KRPvKR fortress → draw"        │    │
-│  │  "If position has Philidor structure → draw"            │    │
+│  │  theorem pattern_X_is_draw (gs : GameState)              │    │
+│  │      (h : hasPatternX gs) : isDraw gs := by              │    │
+│  │    ...actual proof...                                    │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│       │                                                          │
+│       ▼                                                          │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  NOW it's a ProvenReduction:                             │    │
+│  │                                                          │    │
+│  │  • Soundness: Proven                                     │    │
+│  │  • Factor: Count positions with pattern X                │    │
+│  │  • Add to SearchSpaceTracker                             │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Implementation:**
-```python
-def mine_tablebase_patterns():
-    # Query Syzygy for all 7-piece positions
-    for material in MATERIAL_COMBINATIONS_7:
-        positions = syzygy.all_positions(material)
-        draws = [p for p in positions if syzygy.result(p) == DRAW]
+**The pipeline:**
+1. **OBSERVE** pattern in games/tablebases (100% correlation required, not 99%)
+2. **CONJECTURE** that it's always true
+3. **PROVE** in Lean (the actual work)
+4. **QUANTIFY** reduction factor exactly
+5. **TRACK** in SearchSpaceTracker
 
-        # Cluster draws by features
-        features = extract_features(draws)
-        clusters = kmeans(features, k=10)
+### 5.4 Tablebase Mining (Exact Values)
 
-        # Find common patterns in each cluster
-        for cluster in clusters:
-            pattern = find_common_pattern(cluster)
-            if pattern.coverage > 0.9:  # Explains 90% of cluster
-                candidates.append({
-                    'material': material,
-                    'pattern': pattern,
-                    'positions_covered': len(cluster),
-                    'hypothesis': f'{material} with {pattern} is always draw'
-                })
+**Tablebases are the BEST source because they contain EXACT game-theoretic values.**
+
+```
+7-piece tablebase: 549 billion positions with PROVEN outcomes
+                          │
+                          ▼
+   Find patterns where ALL positions with pattern P are draws
+                          │
+                          ▼
+   PROVE: ∀ pos, hasPattern(pos) → isDraw(pos)
+                          │
+                          ▼
+   Reduction: All positions matching P can be pruned
 ```
 
-#### Source D: Python Auto Solver (If Available)
+**Example**: KRPvKR with rook pawn + wrong-side defender king = ALWAYS draw
+- Not 99% draw, not usually draw, but MATHEMATICALLY PROVEN draw
+- This is directly from tablebase = no proof needed for the base case
+- We just need to prove it generalizes to more pieces
 
-**TODO: Investigate what the Python auto solver can do**
-- Position analysis?
-- Pattern mining?
-- Proof search?
-- Game outcome prediction?
-
-#### Source E: LLM Hypothesis Generator (Current!)
-```
-Human: "What properties might make positions equivalent?"
-LLM: "Consider these hypotheses:
-  1. Positions with same pawn skeleton have similar evaluations
-  2. Fortress patterns guarantee draw regardless of moves
-  3. Blockaded positions reduce to smaller search spaces
-  4. ..."
-Human: "Let's formalize #2"
-LLM: [Generates Lean definition]
-```
-
-**Implementation**: This is what we're doing right now!
-
-#### Source D: Tablebase Mining
-```
-1. Load 7-piece tablebase (5.5 × 10^11 positions)
-2. Find patterns in drawn positions:
-   - What material combinations always draw?
-   - What king positions guarantee safety?
-3. Generalize patterns to 8+ piece positions
-4. Example: "K+B vs K+N with pawns on same file always draws"
-```
-
-**Implementation**: Requires tablebase access + pattern mining
-
-### 5.4 The Interactive Loop (Current Implementation)
+### 5.5 The Interactive Loop (Current Implementation)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
