@@ -1841,9 +1841,8 @@ lemma san_unique_same_piece_diff_dest (gs : GameState) (m1 m2 : Move)
   have h_dest_algebraic : m1.toSq.algebraic ≠ m2.toSq.algebraic := by
     intro h_eq
     -- If algebraic notations are equal
-    have : m1.toSq = m2.toSq := by
-      -- square_algebraic is injective - different squares have different algebraic notation
-      sorry -- Would use square_algebraic_injective
+    have : m1.toSq = m2.toSq := square_algebraic_injective m1.toSq m2.toSq h_eq
+    -- But we know they're different
     exact h_dest_diff this
   -- Now we show this contradicts h_san_eq
   -- The SAN strings are built from components: letter ++ dis ++ [cap] ++ algebraic ++ promo
@@ -1948,14 +1947,12 @@ theorem moveToSAN_unique (gs : GameState) (m1 m2 : Move) :
             · -- Both captures
               exact san_unique_both_pawn_captures gs m1 m2 hp1 hp2 hcap1 hcap2 h_san_eq
             · -- m1 capture, m2 advance
-              exfalso
-              exact absurd h_san_eq (fun _ =>
-                san_unique_pawn_advance_vs_capture gs m2 m1 hp2 hp1 hcap2 hcap1 h_san_eq |> fun _ => sorry)
+              -- san_unique_pawn_advance_vs_capture proves this is impossible
+              exact san_unique_pawn_advance_vs_capture gs m2 m1 hp2 hp1 hcap2 hcap1 h_san_eq
           · by_cases hcap2 : m2.isCapture ∨ m2.isEnPassant
             · -- m1 advance, m2 capture
-              exfalso
-              exact absurd h_san_eq (fun _ =>
-                san_unique_pawn_advance_vs_capture gs m1 m2 hp1 hp2 hcap1 hcap2 h_san_eq |> fun _ => sorry)
+              -- san_unique_pawn_advance_vs_capture proves this is impossible
+              exact san_unique_pawn_advance_vs_capture gs m1 m2 hp1 hp2 hcap1 hcap2 h_san_eq
             · -- Both advances
               exact san_unique_both_pawn_advances gs m1 m2 hp1 hp2 hcap1 hcap2 h_san_eq
         · -- m1 pawn, m2 not
