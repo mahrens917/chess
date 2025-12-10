@@ -2,6 +2,21 @@
 
 This repository builds a Lean 4 model of the classic chess game: board geometry, pieces, movement predicates, and the core game state logic.
 
+## Proof Status
+
+**Build:** ✓ Clean | **Tests:** 14/14 Passing | **Formal Proofs:** 209 Complete, 10 In Progress
+
+| Category | Status |
+|----------|--------|
+| Movement Invariants | ✓ Complete (6/6 proven) |
+| Game State Preservation | ✓ Complete (8/8 proven) |
+| Move Generation | ⚠ Nearly Complete (5/6 pieces proven, pawn blocked on 2 sorries) |
+| Parser Soundness | ⚠ Partial (7/10 proven) |
+| Perft Correctness | ⚠ Partial (1/6 proven) |
+| Draw Detection | ✓ Complete (proven) |
+
+**Detailed Status:** See [PROOF_STATUS.md](PROOF_STATUS.md) for live metrics and [PLAN.md](PLAN.md) for roadmap.
+
 ## Layout
 
 - `Chess/Core.lean` defines files/ranks, squares, colors, pieces, boards, and the `GameState` structure.

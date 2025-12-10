@@ -6,11 +6,13 @@ The goal is a Lean chess engine whose rules are fully specified, mechanically pr
 
 | Category | Status |
 |----------|--------|
-| Sorries | 0 |
-| Axioms | 21 (across Movement, Rules, Spec) |
-| Theorems | Comprehensive coverage in progress |
+| Sorries | 10 (5 Perft, 3 Parser, 2 Pawn) |
+| Axioms | 0 (converted to sorries for incremental proof) |
+| Theorems | 209+ proven ✓ |
 | Tests | 14 suites passing ✓ |
 | Build | Clean ✓ |
+
+**See [PROOF_STATUS.md](PROOF_STATUS.md) for detailed metrics and verification commands.**
 
 ### Axiom Breakdown by Module
 

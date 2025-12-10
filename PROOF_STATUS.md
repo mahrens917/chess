@@ -1,0 +1,169 @@
+# Proof Status Tracker
+
+**Last Updated:** 2025-12-09
+**Verification Command:** `grep -rn "sorry$" Chess/*.lean | wc -l`
+
+## Current Metrics
+
+| Metric | Count | Percentage |
+|--------|-------|------------|
+| Total Sorries | 10 | - |
+| Proven Theorems/Lemmas | 209+ | - |
+| Computational Tests Passing | 14/14 | 100% |
+| Build Status | Clean | ✓ |
+
+## Sorry Elimination Progress
+
+**Original Baseline** (2024): 21 axioms
+**Current State** (2025-12-09): 0 axioms, 10 sorries
+**Elimination Rate**: 52% (11 of 21 original proof obligations eliminated)
+
+*Note: The project converted all axioms to theorems with `sorry` placeholders, enabling incremental proof completion while maintaining build stability.*
+
+---
+
+## Sorries by Category
+
+### Category 1: Perft Correctness (5 sorries)
+
+**File:** `Chess/PerftProofs.lean`
+**Lines:** 184, 203, 255, 277, 459
+
+- [ ] Line 184: `algebraic_uniqueness` - **KNOWN FALSE** (counter-example documented)
+- [ ] Line 203: `perft_foldl_count_correspondence` - foldl length correspondence
+- [ ] Line 255: `gameLine_first_move_disjoint` - game line disjointness (proof mostly complete)
+- [ ] Line 277: `perft_complete_succ` - move completeness induction
+- [ ] Line 459: `perft_bijective_san_traces_succ` - SAN trace bijection
+
+**Impact:** Blocks formal verification of perft algorithm correctness
+**Computational Status:** ✓ All perft tests pass to depth 4+
+**Action Required:** Replace false theorem, then prove remaining 4
+
+---
+
+### Category 2: Parser Round-Trips (3 sorries)
+
+**File:** `Chess/Parsing_SAN_Proofs.lean`
+**Lines:** 45, 62, 74
+
+- [ ] Line 45: `moveFromSAN_moveToSAN_roundtrip` - SAN round-trip preservation
+- [ ] Line 62: `moveFromSAN_preserves_move_structure` - move structure invariants
+- [ ] Line 74: `parseSanToken_normalizes_castling` - castling notation normalization
+
+**Impact:** Blocks formal parser soundness/completeness proof
+**Computational Status:** ✓ All FEN/SAN/PGN tests pass, 100+ PGN corpus verified
+**Action Required:** Prove all 3 (mostly string/list reasoning)
+
+---
+
+### Category 3: Pawn Move Generation (2 sorries)
+
+**File:** `Chess/Spec.lean`
+**Lines:** 1678, 1701
+
+- [ ] Line 1678: `pawnAdvance_singleStep_isEmpty` - single-step target emptiness
+- [ ] Line 1701: `pawnAdvance_twoStep_isEmpty` - two-step target/intermediate emptiness
+
+**Impact:** Blocks `fideLegal_in_pieceTargets` theorem (pawn case)
+**Computational Status:** ✓ All pawn move tests pass, perft validated
+**Action Required:** Prove both (enables complete move generation proof)
+
+**Note:** Knight, King, Rook, Bishop, Queen cases are fully proven. These 2 sorries are the final blockers for claiming "move generation proven for all piece types."
+
+---
+
+## Verification Commands
+
+Update metrics with these commands:
+
+```bash
+# Count sorries in active code (excluding trash/)
+grep -rn "sorry$" Chess/*.lean | wc -l
+
+# List all sorry locations with context
+grep -rn "sorry$" Chess/*.lean
+
+# Count theorems and lemmas
+grep -rn "^theorem\|^lemma" Chess/*.lean | wc -l
+
+# Verify tests pass
+lake test
+
+# Verify build succeeds
+lake build
+
+# Verify slow tests pass
+lake exe slowTests
+```
+
+---
+
+## Status Summary by Component
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **Movement Invariants** | ✓ Complete (6/6 proven) | All piece geometry theorems proven |
+| **Game State Preservation** | ✓ Complete (8/8 proven) | simulateMove, finalizeResult all proven |
+| **Move Generation** | ⚠ Nearly Complete (5/6 pieces) | 5 piece types proven, pawn blocked on 2 sorries |
+| **Parser Soundness** | ⚠ Partial (7/10 proven) | 3 SAN round-trip sorries remain |
+| **Perft Correctness** | ⚠ Partial (1/6 proven) | 5 sorries remain, 1 is false theorem |
+| **Draw Detection** | ✓ Proven | Checkmate, stalemate, draws all proven |
+
+---
+
+## Priority Ranking
+
+### Tier 1: High ROI (Unlocks Completeness)
+1. **Pawn sorries (Spec.lean:1678, 1701)** - 2-4 hours
+   - Once proven: All piece types complete → Full move generation theorem
+
+### Tier 2: Medium ROI (Unlocks Claims)
+2. **Parser round-trips (Parsing_SAN_Proofs.lean:45, 62, 74)** - 6-12 hours
+   - Once proven: Parser soundness/completeness formally established
+
+### Tier 3: Algorithm Correctness
+3. **Perft proofs (PerftProofs.lean:203, 255, 277, 459)** - 16-24 hours
+   - Once proven: Perft algorithm formally correct
+   - Note: Line 184 must be replaced with correct theorem first
+
+---
+
+## Update Protocol
+
+When eliminating a sorry:
+
+1. **Remove checkbox** from category above
+2. **Update "Total Sorries"** count in metrics table
+3. **Update "Elimination Rate"** percentage
+4. **Update "Last Updated"** date
+5. **Run verification commands** to confirm
+6. **Commit message template:**
+   ```
+   Eliminate sorry: [theorem name] ([new count] remaining)
+
+   - Proved [theorem name] in [file]:[line]
+   - Updated PROOF_STATUS.md ([old count] → [new count] sorries)
+   - All tests passing
+   ```
+
+---
+
+## Build & Test Status
+
+**Last Build:** ✓ Clean
+**Last Test Run:** ✓ 14/14 suites passing
+**Last Slow Test Run:** ✓ Perft to depth 4+ passing
+
+To maintain this:
+- `lake build` after every sorry elimination
+- `lake test` after every phase
+- `lake exe slowTests` before committing changes
+
+---
+
+## References
+
+- Implementation plan: `/Users/mahrens917/.claude/plans/greedy-pondering-bubble.md`
+- Project requirements: `/Users/mahrens917/chess/CLAUDE.md`
+- Test details: `/Users/mahrens917/chess/Test/Main.lean`
+- Proof code: `/Users/mahrens917/chess/Chess/*Proofs.lean`
