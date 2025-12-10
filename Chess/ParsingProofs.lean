@@ -1331,20 +1331,23 @@ lemma pieceLetter_injective : ∀ pt1 pt2 : PieceType,
 lemma castle_destination_determines_side (file : Nat) (h : file < 8) :
     (file = 6) ↔ ¬(file = 2) := by omega
 
-/-- Helper: Square algebraic notation is injective (a1 ≠ a2, etc.) -/
+/-- Helper: Square algebraic notation is injective (a1 ≠ a2, etc.)
+
+    This lemma requires proving that Char.ofNat is injective on the ranges used
+    for file (0-7 → 'a'-'h') and rank (0-7 → '1'-'8') characters.
+
+    **TODO**: This can be proven by showing character encoding is bijective,
+    but requires Lean's character library lemmas about Char.ofNat injectivity.
+
+    For now: Marked as requiring character library support.
+-/
 lemma square_algebraic_injective : ∀ sq1 sq2 : Square,
     sq1.algebraic = sq2.algebraic → sq1 = sq2 := by
   intro sq1 sq2 h
-  -- Both squares have 2-character algebraic notation: file (a-h) + rank (1-8)
-  -- If the strings are equal, the file and rank characters must be equal
-  -- This determines the Square uniquely
-  ext
-  -- Square equality reduces to field equality: fileNat and rankNat
-  -- h : algebraic sq1 = algebraic sq2
-  -- sq1.algebraic = String.singleton (fileChar sq1.fileNat) ++ String.singleton (rankChar sq1.rankNat)
-  -- sq2.algebraic = String.singleton (fileChar sq2.fileNat) ++ String.singleton (rankChar sq2.rankNat)
-  -- Equal strings ⇒ equal character sequences
-  sorry -- Would need: Character comparison lemmas for fileChar and rankChar injectivity
+  -- Both squares encode to unique 2-character strings (file + rank)
+  -- fileChar and rankChar are deterministic character encodings
+  -- Equal strings ⇒ equal files and ranks ⇒ equal squares
+  sorry -- Requires: Char.ofNat injectivity for limited ranges [0,8) → [a,h] and [1,8]
 
 /-- Helper: Promotion suffix uniquely encodes promotion piece type -/
 lemma promotionSuffix_injective : ∀ p1 p2 : Option PieceType,
@@ -1759,10 +1762,32 @@ lemma san_unique_same_piece_diff_dest (gs : GameState) (m1 m2 : Move)
       sorry -- Would use square_algebraic_injective
     exact h_dest_diff this
   -- Now we show this contradicts h_san_eq
-  -- The algebraic notation appears in both strings at the same position
-  -- If they're equal component-by-component after extracting, we get the contradiction
-  -- Extract destination substring from both sides - they must differ for different dest
-  sorry -- TODO: String slicing to extract destination part and show contradiction
+  -- The SAN strings are built from components: letter ++ dis ++ [cap] ++ algebraic ++ promo
+  -- Both start with the same piece letter (same type)
+  -- The algebraic parts differ (different squares)
+  -- So the full strings must differ
+  -- But h_san_eq says they're equal - contradiction
+
+  -- The algebraic notation is part of the concatenated string in a specific position
+  -- For a fixed structure with different algebraic parts, the full strings can't be equal
+  -- This requires showing that string concatenation preserves injectivity on components
+
+  -- The key insight: different squares produce different algebraic notations
+  -- (via injective Char.ofNat encoding for file and rank)
+  -- If m1.toSq ≠ m2.toSq, then their algebraic strings differ
+  have h_algebraic_ne : m1.toSq.algebraic ≠ m2.toSq.algebraic := by
+    intro h_eq
+    -- If algebraic notations are equal, squares must be equal
+    have : m1.toSq = m2.toSq := square_algebraic_injective m1.toSq m2.toSq h_eq
+    -- But we know they're different
+    exact h_dest_diff this
+
+  -- Now: the SAN strings contain these algebraic parts at a fixed position
+  -- String composition injectivity: if full strings are equal but components differ,
+  -- we have a contradiction
+  -- (The algebraic notation is part of the concatenated SAN string:
+  --  pieceLetter ++ disambiguation ++ capture? ++ algebraic ++ promotion?)
+  sorry -- String composition injectivity: equal strings ⇒ equal components
 
 -- ============================================================================
 -- MAIN THEOREM: SAN UNIQUE
