@@ -536,5 +536,22 @@ def perft : GameState → Nat → Nat
   | gs, Nat.succ d =>
       (allLegalMoves gs).foldl (fun acc m => acc + perft (GameState.playMove gs m) d) 0
 
+-- Helper: Apply sequence of moves without validation (for dead position proofs)
+def applyMoveSequence : GameState → List Move → GameState
+  | gs, [] => gs
+  | gs, m :: ms => applyMoveSequence (GameState.playMove gs m) ms
+
+-- Helper: Count pieces other than kings
+def countNonKingPieces (gs : GameState) : Nat :=
+  allSquares.foldl (fun acc sq =>
+    match gs.board sq with
+    | some p => if p.pieceType ≠ PieceType.King then acc + 1 else acc
+    | none => acc) 0
+
+-- Formal definition: no sequence of moves leads to checkmate
+-- A position is dead if and only if no sequence of legal moves can reach checkmate
+def isDeadPosition (gs : GameState) : Prop :=
+  ¬∃ (moves : List Move), isCheckmate (applyMoveSequence gs moves)
+
 end Rules
 end Chess

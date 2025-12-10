@@ -82,15 +82,15 @@ def repetitionDrawPruning : Reduction :=
 /--
 Insufficient material pruning: Positions with insufficient mating material are automatic draws.
 Examples: K vs K, K+B vs K, K+N vs K, K+B vs K+B (same-color bishops).
-FIDE Article 9.4 covers dead positions.
+FIDE Article 5.2.2 covers dead positions.
 -/
 def insufficientMaterialPruning : Reduction :=
   { estimate := "~10^113"
     label := "Insufficient material pruning"
-    status := "cited"
-    notes := "Automatic draw when neither side has mating material (K+minor vs K, etc.)."
-    citation := some "FIDE Laws of Chess, Article 9.4 (Dead Position)"
-    proof := some "Chess.Rules.insufficientMaterial, Chess.Rules.deadPosition" }
+    status := "proven"
+    notes := "Automatic draw when neither side has mating material. Soundness proven in DeadPositionProofs.lean."
+    citation := some "FIDE Laws of Chess, Article 5.2.2 (Dead Position)"
+    proof := some "Chess.DeadPositionProofs.deadPosition_sound, Chess.DeadPositionProofs.king_vs_king_dead, Chess.DeadPositionProofs.king_knight_vs_king_dead, Chess.DeadPositionProofs.king_bishop_vs_king_dead, Chess.DeadPositionProofs.same_color_bishops_dead" }
 
 /--
 50-move rule pruning: If 50 consecutive moves occur without pawn move or capture, a draw can be claimed.
