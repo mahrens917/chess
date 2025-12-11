@@ -347,6 +347,8 @@ def normalizeCastleToken (s : String) : String :=
 
 def parseSanToken (token : String) : Except String SanToken := do
   let trimmed := token.trim.replace "e.p." ""
+  -- Also remove "ep" suffix if it appears after a move (e.g., exd6ep)
+  let trimmed := if trimmed.endsWith "ep" then trimmed.dropRight 2 else trimmed
   if trimmed.isEmpty then
     throw "SAN token cannot be empty"
   let rec peelAnnotations (chars : List Char) (acc : List Char) :
@@ -373,7 +375,7 @@ def parseSanToken (token : String) : Except String SanToken := do
   let base := String.ofList afterChecks.reverse
   if base.isEmpty then
     throw s!"SAN token missing move description: {token}"
-  let nags := if annRev.isEmpty then [] else [String.ofList annRev.reverse]
+  let nags := if annRev.isEmpty then [] else [String.ofList annRev]
   let normalized := normalizeCastleToken base
   let hint :=
     if hasMate then some SanCheckHint.mate
@@ -415,10 +417,11 @@ def moveFromSAN (gs : GameState) (token : String) : Except String Move := do
 
 def applySAN (gs : GameState) (token : String) : Except String GameState := do
   -- Reject moves if the game has ended
-  if gs.result.isSome then
-    throw "Cannot play moves after game has ended"
-  let m ← moveFromSAN gs token
-  applyLegalMove gs m
+  match gs.result with
+  | some _ => throw "Cannot play moves after game has ended"
+  | none =>
+      let m ← moveFromSAN gs token
+      applyLegalMove gs m
 
 def applySANs (gs : GameState) (tokens : List String) : Except String GameState :=
   tokens.foldlM (fun st t => applySAN st t) gs
@@ -427,14 +430,17 @@ structure StripState where
   inBrace : Bool := false
   inParen : Nat := 0
   skipLine : Bool := false
+  hasVariations : Bool := false
 
-def stripPGNNoise (pgn : String) : String :=
+def stripPGNNoise (pgn : String) : Except String String :=
   let step (stateAcc : StripState × List Char) (c : Char) : StripState × List Char :=
     let (state, acc) := stateAcc
     match c with
     | '{' => ({ state with inBrace := true }, acc)
     | '}' => ({ state with inBrace := false }, acc)
-    | '(' => ({ state with inParen := state.inParen + 1 }, acc)
+    | '(' =>
+        let newState := { state with inParen := state.inParen + 1, hasVariations := true }
+        (newState, acc)
     | ')' =>
         let nextParen := if state.inParen = 0 then 0 else state.inParen - 1
         ({ state with inParen := nextParen }, acc)
@@ -445,8 +451,13 @@ def stripPGNNoise (pgn : String) : String :=
           (state, acc)
         else
           (state, c :: acc)
-  let (_, charsRev) := pgn.foldl step ({}, [])
-  String.ofList charsRev.reverse
+  let (finalState, charsRev) := pgn.foldl step ({}, [])
+  if finalState.hasVariations then
+    throw "PGN contains variations which are not supported"
+  else if finalState.inBrace then
+    throw "PGN contains unclosed comment"
+  else
+    pure (String.ofList charsRev.reverse)
 
 def parseTags (pgn : String) : List (String × String) :=
   let rec loop : List String → List (String × String)
@@ -462,19 +473,21 @@ def parseTags (pgn : String) : List (String × String) :=
           loop rest
   loop (pgn.splitOn "\n")
 
-def tokensFromPGN (pgn : String) : List String :=
+def tokensFromPGN (pgn : String) : Except String (List String) :=
   let withoutTags :=
     pgn.splitOn "\n"
       |>.filter (fun line => ¬ line.trim.startsWith "[")
       |> String.intercalate "\n"
-  let cleaned := stripPGNNoise withoutTags
-  let normalized := cleaned.map (fun c => if c = '\n' ∨ c = '\t' ∨ c = '\r' then ' ' else c)
-  normalized.splitOn " "
-    |>.filter (fun t => ¬ t.isEmpty)
-    |>.filter (fun t => ¬ t.startsWith "[" ∧ ¬ t.endsWith "]")
+  do
+    let cleaned ← stripPGNNoise withoutTags
+    let normalized := cleaned.map (fun c => if c = '\n' ∨ c = '\t' ∨ c = '\r' then ' ' else c)
+    pure (normalized.splitOn " "
+      |>.filter (fun t => ¬ t.isEmpty)
+      |>.filter (fun t => ¬ t.startsWith "[" ∧ ¬ t.endsWith "]"))
 
 def splitMoveTokens (tokens : List String) : (List String × Option String) :=
-  let moves := tokens.filter (fun t => ¬ t.toList.any (fun c => c = '.') ∧ ¬ isResultToken t)
+  let upToResult := tokens.takeWhile (fun t => ¬ isResultToken t)
+  let moves := upToResult.filter (fun t => ¬ t.toList.any (fun c => c = '.'))
   let res := tokens.find? isResultToken
   (moves, res)
 
@@ -502,8 +515,23 @@ def startFromTags (tags : List (String × String)) : Except String GameState :=
 
 def playPGNStructured (pgn : String) : Except String PGNGame := do
   let tags := parseTags pgn
-  let allTokens := tokensFromPGN pgn
+  let allTokens ← tokensFromPGN pgn
   let (moveTokens, resultTok) := splitMoveTokens allTokens
+  -- Check if there are any tokens after the result token
+  if resultTok.isSome then
+    let resultIdx := allTokens.findIdx? isResultToken
+    match resultIdx with
+    | some idx =>
+        let tokensAfterResult := allTokens.drop (idx + 1)
+        let hasMovesAfterResult := tokensAfterResult.any fun t =>
+          ¬ t.toList.any (fun c => c = '.') && ¬ isResultToken t
+        if hasMovesAfterResult then
+          throw "PGN has moves after result token"
+        else
+          pure ()
+    | none => pure ()
+  else
+    pure ()
   let gameResult := resultFromTokens resultTok
   let sanWithNags ← collectSanWithNags moveTokens
   let start ← startFromTags tags

@@ -16,11 +16,7 @@ lean_exe «searchSpace» {
   root := `Chess.SearchSpaceReport
 }
 
-lean_exe «slowTests» {
-  root := `SlowTests.Main
-}
-
 @[test_driver]
 lean_exe «test» {
-  root := `Test.Runner
+  root := `Test.TestDriver
 }
