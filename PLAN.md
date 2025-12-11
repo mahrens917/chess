@@ -1,171 +1,221 @@
-# Chess Completeness Plan
+# Chess Formalization Roadmap
 
-The goal is a Lean chess engine whose rules are fully specified, mechanically proven, and covered by comprehensive executable tests.
+This document tracks every open item on the path from the current Lean implementation to a provably correct, fully featured chess engine and beyond.
 
-## Current Status
+## 1. Reach Full Chess Feature Compliance
+- **Move application consistency**
+  - Route every state transition (`perft`, generators, demos) through `GameState.playMove` so checkmate/stalemate/draw flags are always finalized.
+  - Audit for direct `movePiece` usage and either prove safety lemmas or eliminate the calls.
+- **Rule coverage gaps**
+  - Ensure en-passant availability requires a legal double-push history, not just board plausibility.
+  - Enforce half-move/full-move counters inside SAN/PGN play to detect 50/75-move draws mid-game.
+  - Verify automatic draw detection triggers when PGN-specified results disagree with board state.
+  - Model underpromotion captures from SAN/PGN with explicit target piece validation.
+  - Guarantee history snapshots include the starting position loaded via FEN/PGN for repetition checks.
+- **Parsing robustness**
+  - FEN: validate impossible castling flags (king/rook moved) via move history metadata where available.
+  - SAN: support all suffix annotations (`!!`, `!?`, `??`), “ep” markers, and algebraic ambiguity detection for rare piece counts (e.g., four knights).
+  - PGN: handle comments/variations deterministically (reject unsupported constructs with clear errors).
+- **Demo polish**
+  - Demonstrate FEN/SAN/PGN round-trips, en-passant, castling, and draw detection in `chessDemo`.
+  - Provide CLI flags or inputs to load PGN/FEN from files for reproducible showcases.
+- **Documentation**
+  - Expand README with end-to-end usage examples (parsing a PGN, running perft, invoking slow tests).
+  - Record FEN/SAN/PGN specification references and any deviations.
 
-| Category | Status |
-|----------|--------|
-| Sorries | 10 (5 Perft, 3 Parser, 2 Pawn) |
-| Axioms | 0 (converted to sorries for incremental proof) |
-| Theorems | 209+ proven ✓ |
-| Tests | 14 suites passing ✓ |
-| Build | Clean ✓ |
+## 2. Testing Requirements
+- **Fast suite (`lake test`)**
+  - Cover every rule branch: castling legality, en-passant validation, promotion variants, repetition/draw triggers, parser round-trips.
+  - Assert that SAN check/mate hints are validated across diverse boards.
+  - Include canonical perft depths (1–3 for start, plus tactical FENs) with expected node counts.
+- **Slow/extended suite (`RUN_SLOW_TESTS=1`)**
+  - Deeper perft baselines (depth 4–5) for start and edge-case FENs (castling, en-passant).
+  - Full PGN game corpus samples (e.g., famous games, tablebase endings) to exercise long sequences.
+  - Stress FEN loader with random legal positions (coordinated with generator once available).
+- **Continuous integration**
+  - Make slow tests part of release workflow or nightly build.
+  - Capture test commands/results in PR templates.
 
-**See [PROOF_STATUS.md](PROOF_STATUS.md) for detailed metrics and verification commands.**
+## 3. Documentation Artifacts
+- **Specification references**
+  - Link to official FIDE Laws of Chess, PGN standard, and SAN/FEN documents.
+  - Document assumptions (e.g., clocks ignored, no adjournments).
+- **Developer guides**
+  - Explain how to add new rules plus the proofs/tests required.
+  - Checklist for introducing new parsing features or demo scenarios.
+- **User/demo docs**
+  - Walkthrough for deriving SAN from a board, playing PGN files, and exporting FEN snapshots.
 
-### Axiom Breakdown by Module
+## 4. Formal Proof Backlog
+- **Core theorems**
+  - Prove `allLegalMoves` exactly matches the encoded rules (piece movement, castling, en-passant, promotions).
+  - Show `GameState.playMove` preserves board invariants (single occupancy, piece counts) and updates clocks correctly.
+  - Formalize draw detection correctness: 50/75-move rules, repetition counts, insufficient material classifications.
+  - Demonstrate SAN/FEN/PGN parser soundness (parsed game reproduces original when serialized) and completeness (all legal SAN strings parse).
+- **Perft correctness**
+  - Prove `perft` counts match the recursive expansion definition using induction over depth.
+- **History/repetition**
+  - Establish the link between stored `history` snapshots and the official repetition rules.
+- **Documentation of proofs**
+  - Record theorem names and statements in README/CLAUDE requirements, ensuring future contributors see the growing proof corpus.
 
-**Movement.lean** (2 axioms)
-- `rookMove_target_at_offset` - Rook movement geometry
-- `bishopMove_target_at_offset` - Bishop movement geometry
+## 5. Search Space Tracking System
 
-**Rules.lean** (4 axioms)
-- `slidingWalk_completeness_aux` - Sliding piece trajectory
-- `slidingWalk_generates_target` - Sliding piece target generation
-- `slidingWalk_mem_foldr_cons` - Foldr membership for sliding walks
-- `slidingWalk_in_slidingTargets` - Sliding walk to target mapping
+Every reduction must be **computable** - we track exact search space at each step.
 
-**Spec.lean** (15 axioms)
-1. **Board invariants** (2):
-   - `enPassantTarget_rank_constraint` - EP targets on rank 3 or 6
-   - `enPassant_target_isEmpty` - EP target squares always empty
+### 5.1 Core Data Structures
 
-2. **Completeness** (2):
-   - `fideLegal_in_pieceTargets_axiom` - pieceTargets generates all fideLegal moves
-   - `fideLegal_exact_in_pieceTargets` - Exact move membership in pieceTargets
+```lean
+/-- A proven reduction with its exact factor -/
+structure ProvenReduction where
+  name : String
+  factor : ℕ                           -- Exact reduction factor (e.g., 2 for color symmetry)
+  proof : ProofCertificate             -- Link to Lean theorem
+  applies : GameState → Bool           -- When does this reduction apply?
+  count : GameState → ℕ                -- Positions eliminated in this state
 
-3. **Sliding geometry** (2):
-   - `rookRay_intermediates_empty` - Path between rook src/tgt is clear
-   - `bishopRay_intermediates_empty` - Path between bishop src/tgt is clear
+/-- Running search space tracker -/
+structure SearchSpaceState where
+  currentEstimate : ℕ                  -- Current search space size
+  appliedReductions : List ProvenReduction
+  remainingCandidates : List ReductionCandidate
+  computationLog : List (String × ℕ)   -- (reduction name, space after)
+```
 
-4. **Pawn logic** (7):
-   - `castleMoveIfLegal_produces_fideLegal` - Castle generation correctness
-   - `pawnAdvance_squareFromInts` - Square conversion for pawn advances
-   - `pawnCapture_squareFromInts` - Square conversion for pawn captures
-   - `pawnAdvance_singleStep_isEmpty` - Single-step target is empty
-   - `pawnAdvance_twoStep_isEmpty` - Two-step intermediate/target empty
-   - `enPassant_not_promo_rank` - EP captures don't reach promo rank
-   - `pawnAdvance_in_forwardMoves` - Pawn advance in forward move list
-   - `pawnCapture_in_captureMoves` - Pawn capture in capture move list
+### 5.2 Implementation Phases
 
-2. **Additional pawn axiom** (1):
-   - `enPassant_target_isEmpty` (Spec.lean:1105) - Duplicate of board invariant
+**Phase 1: Baseline Computation**
+- [ ] Implement `countLegalPositions : ℕ → ℕ` - count positions reachable in N plies
+- [ ] Implement `estimateStateSpace : ℕ` - compute Tromp's 2×10^44 from first principles
+- [ ] Implement `branchingFactor : GameState → ℕ` - exact legal move count
+- [ ] Prove: `branchingFactor gs = (allLegalMoves gs).length`
 
----
+**Phase 2: Reduction Pipeline**
+- [ ] Each reduction is a `ProvenReduction` with computable factor
+- [ ] `applyReduction : SearchSpaceState → ProvenReduction → SearchSpaceState`
+- [ ] Log every application: `(name, before, after, factor)`
+- [ ] Invariant: `after = before / factor` (with proof)
 
-## Future Work (Priority Order)
+**Phase 3: Computable Reductions**
+| Reduction | Factor Formula | Implementation |
+|-----------|---------------|----------------|
+| Color symmetry | `2` | `÷ 2` always |
+| Board reflection | `symmetricPositions gs / totalPositions` | Compute per-position |
+| 50-move rule | `drawableByRule gs ? 0 : current` | Prune when drawable |
+| Repetition | `seenBefore gs ? 0 : current` | Prune on repeat |
+| Insufficient material | `isDead gs ? 0 : current` | Prune dead positions |
+| Alpha-beta | `√(branchingFactor gs)` | Per-node reduction |
 
-### Phase 1: Eliminate Geometric Axioms (Movement/Rules modules)
+**Phase 4: Live Tracking Output**
+```
+Starting search space: 2.00 × 10^44
+After color symmetry (÷2): 1.00 × 10^44  [Proven: Color.opposite_opposite]
+After transposition (÷10^79): 1.00 × 10^44  [Note: already at position level]
+After alpha-beta (÷10^22): 1.00 × 10^22  [Proven: alpha_beta_correct]
+After 50-move pruning (÷10^3): 1.00 × 10^19  [Proven: fifty_move_terminates]
+...
+Current estimate: X.XX × 10^N
+Gap to feasibility (10^20): 10^(N-20)
+```
 
-**Status**: 6 axioms blocking complete axiom-free piece movement
+### 5.3 Proof Requirements Per Reduction
 
-1. **Movement.lean axioms** (2):
-   - `rookMove_target_at_offset` - Prove rook offset calculation
-   - `bishopMove_target_at_offset` - Prove bishop offset calculation
+Each reduction MUST have:
+1. **Soundness theorem**: Reduction doesn't change game-theoretic value
+2. **Factor theorem**: Exact reduction factor is provably correct
+3. **Decidability**: `applies` function is computable
+4. **Composition**: Combining with other reductions is sound
 
-   **Action**: Extract geometric lemmas and prove via coordinate arithmetic
+## 6. Reduction Discovery System
 
-2. **Rules.lean axioms** (4):
-   - `slidingWalk_completeness_aux` - Trajectory enumeration completeness
-   - `slidingWalk_generates_target` - Sliding piece targets exhaustive
-   - `slidingWalk_mem_foldr_cons` - List membership for sliding walks
-   - `slidingWalk_in_slidingTargets` - Map sliding walks to board targets
+A systematic process for finding and proving new search space reductions.
 
-   **Action**: Formalize sliding piece path enumeration as mathematical structure
+### 6.1 The Discovery Loop
 
-### Phase 2: Eliminate Geometric Path Axioms (Spec.lean)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    DISCOVERY SYSTEM                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌────────┐│
+│  │ IDENTIFY │───▶│ FORMALIZE│───▶│  PROVE   │───▶│QUANTIFY││
+│  └──────────┘    └──────────┘    └──────────┘    └────────┘│
+│       │                                              │      │
+│       │              ┌──────────┐                    │      │
+│       └──────────────│IMPLEMENT │◀───────────────────┘      │
+│                      └──────────┘                           │
+│                           │                                 │
+│                           ▼                                 │
+│                    ┌──────────┐                             │
+│                    │  TRACK   │──▶ Update SearchSpaceState  │
+│                    └──────────┘                             │
+└─────────────────────────────────────────────────────────────┘
+```
 
-**Status**: 2 axioms blocking rook/bishop completeness
+### 6.2 Discovery Sources
 
-3. **Spec.lean axioms** (2):
-   - `rookRay_intermediates_empty` (line 494) - Path clearance for rooks
-   - `bishopRay_intermediates_empty` (line 506) - Path clearance for bishops
+**Source A: Chess Knowledge Mining**
+- [ ] Endgame theory (fortresses, wrong-colored bishop, etc.)
+- [ ] Opening theory (transposition classes)
+- [ ] Middlegame patterns (piece coordination bounds)
+- [ ] Known tablebase properties (DTZ patterns)
 
-   **Action**: Prove using squaresBetween logic and coordinate arithmetic
+**Source B: Structural Analysis**
+- [ ] Pawn structure equivalence classes
+- [ ] King safety zone enumeration
+- [ ] Piece mobility bounds by position
+- [ ] Blocked position detection
 
-### Phase 3: Eliminate Pawn Generation Axioms (Spec.lean)
+**Source C: Automated Search**
+- [ ] Generate random positions, cluster by outcome
+- [ ] Find invariants that predict game-theoretic value
+- [ ] Use Lean's tactic framework to search for proofs
 
-**Status**: 5 axioms blocking pawn move completeness
+**Source D: Literature Review**
+- [ ] Allis (1994) - game-theoretic techniques
+- [ ] Tromp - position enumeration methods
+- [ ] Tablebase papers - retrograde analysis
 
-4. **Spec.lean pawn axioms** (5):
-   - `pawnAdvance_singleStep_isEmpty` (line 1069)
-   - `pawnAdvance_twoStep_isEmpty` (line 1079)
-   - `enPassant_not_promo_rank` (line 1113)
-   - `pawnAdvance_in_forwardMoves` (line 1122)
-   - `pawnCapture_in_captureMoves` (line 1158)
+### 6.3 Candidate Evaluation Criteria
 
-   **Action**: Prove via square arithmetic and board state analysis
+| Criterion | Weight | Question |
+|-----------|--------|----------|
+| **Provability** | 40% | Can we write a Lean proof? |
+| **Factor size** | 30% | How much does it reduce? (10^N) |
+| **Applicability** | 20% | What % of positions does it apply to? |
+| **Compute cost** | 10% | Is detection O(1), O(n), O(n²)? |
 
-### Phase 4: Eliminate Square Conversion Axioms (Spec.lean)
+Score = Provability × Factor × Applicability / ComputeCost
 
-**Status**: 2 axioms for internal square calculations
+### 6.4 Current Candidate Queue
 
-5. **Spec.lean square axioms** (2):
-   - `pawnAdvance_squareFromInts` (line 1051)
-   - `pawnCapture_squareFromInts` (line 1061)
+| Priority | Candidate | Est. Factor | Proof Path | Status |
+|----------|-----------|-------------|------------|--------|
+| 1 | `allLegalMoves` completeness | - | Induction on piece types | **In Progress** |
+| 2 | Fortress patterns | 10^2 | Case enumeration | Not Started |
+| 3 | Opposite-color bishop draw | 10^1 | Tablebase verification | Not Started |
+| 4 | Pawn structure hashing | 10^2 | Equivalence relation | Not Started |
+| 5 | Zugzwang detection | 10^1 | Position analysis | Not Started |
+| 6 | Blockade detection | 10^2 | Pawn chain analysis | Not Started |
 
-   **Action**: Extract coordinate helpers and prove square construction
+### 6.5 Promotion Criteria
 
-### Phase 5: Eliminate Board Invariant Axioms (Spec.lean)
+A candidate becomes a `ProvenReduction` when:
+1. ✓ Lean theorem compiles and type-checks
+2. ✓ Factor is computed exactly (not estimated)
+3. ✓ Detection function passes all tests
+4. ✓ Composition with existing reductions is proven sound
+5. ✓ Added to `SearchSpaceState.appliedReductions`
 
-**Status**: 2 critical axioms blocking game state correctness
+## 7. Beyond Full Compliance: Toward Solving Chess
 
-6. **Spec.lean board invariants** (2):
-   - `enPassantTarget_rank_constraint` (line 113) - EP targets always on rank 3/6
-   - `enPassant_target_isEmpty` (line 121) - EP targets always empty
-
-   **Action**: Prove playMove state machine preserves invariants
-
-   **Subtasks**:
-   - Formalize playMove as state transition
-   - Prove EP target set correctly on 2-square pawn push
-   - Prove EP target cleared on all other moves
-   - Prove invariant holds from starting position forward
-
-### Phase 6: Complete Move Generation Logic (Spec.lean)
-
-**Status**: 2 axioms blocking completeness of move generation
-
-7. **Spec.lean completeness axioms** (2):
-   - `fideLegal_in_pieceTargets_axiom` (line 224) - All legal moves generated
-   - `fideLegal_exact_in_pieceTargets` (line 233) - Move in target list iff legal
-   - `castleMoveIfLegal_produces_fideLegal` (line 1005) - Castling generation correct
-
-   **Action**: Combine per-piece proofs with knight/king axiom-free cases
-
-   **Dependencies**: Phases 1-5 must be complete
-
-### Phase 7: Move Generation Soundness (New Module)
-
-**High Priority**: Ensure generated moves are actually legal
-
-- `allLegalMoves_sound` — All moves from allLegalMoves satisfy fideLegal
-- `allLegalMoves_complete` — All fideLegal moves appear in allLegalMoves
-- King safety checks for non-castling
-- Pinned piece detection
-
-### Phase 8: Game Result Correctness (New Module)
-
-**High Priority**: Verify checkmate/stalemate/draw detection
-
-- `checkmate_iff_inCheck_and_no_legal_moves` — Characterize checkmate
-- `stalemate_iff_not_inCheck_and_no_legal_moves` — Characterize stalemate
-- `draw_by_insufficient_material_correct` — K+N vs K, K+B vs K, etc.
-- `draw_by_halfmove_correct` — 50-move rule (halfmove ≥ 100)
-- `draw_by_repetition_correct` — Threefold/fivefold repetition
-
-### Phase 9: Test Coverage Expansion (Executable)
-
-- Perft validation against tablebases (current: basic smoke tests)
-- SAN parsing fuzzer with round-trip validation
-- FEN parsing fuzzer for edge cases (en passant, castling flags, unusual positions)
-- Endgame corpus: KRK, KQK, KBBK, KBNK
-- Famous games (Kasparov-Topalov 1999, Fischer-Spassky 1972, etc.)
-
-### Phase 10: Documentation & API (Optional)
-
-- Module-level docstrings with FIDE Law references
-- Theorem proof sketches linking to Lean definitions
-- API reference with board/move/game state semantics
-- Update README with notation support and examples
+- **Symmetry reductions**
+  - Formally prove color-flip and rotational symmetries so equivalent positions can be collapsed.
+- **Recursive decomposition**
+  - Identify substructures (pawnless endings, locked pawn files) and prove they reduce to smaller solved cases.
+- **Pruning invariants**
+  - Prove sufficient conditions for pruning (fortresses, perpetual checks, tablebase draws) during search.
+- **Automated strategy**
+  - Combine reductions and pruning into a verified search that incrementally increases solved depth.
+- **Long-term milestone**
+  - Aim for endgame-tablebase proofs, then middlegame strategies, ultimately inching toward a complete solution.
