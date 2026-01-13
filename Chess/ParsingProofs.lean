@@ -1562,13 +1562,17 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
             -- fileChar determines source file
             -- With same dest, adjacent rank (capture diagonal), file determines source
             have h_file_eq : m1.fromSq.fileChar = m2.fromSq.fileChar := by
-              -- First char of SAN is source file
-              have h1 := String.take_append (String.singleton m1.fromSq.fileChar) _
-              have h2 := String.take_append (String.singleton m2.fromSq.fileChar) _
-              simp at h_san_eq
-              sorry -- String manipulation to extract first char
-            -- With same file and adjacent rank from dest, source is same
-            sorry -- Geometric argument
+              -- Pawn capture SAN format: fileChar ++ "x" ++ dest ++ promo
+              -- First char is source file letter
+              -- For m1: String.singleton m1.fromSq.fileChar ++ "x" ++ ...
+              -- For m2: String.singleton m2.fromSq.fileChar ++ "x" ++ ...
+              -- From h_san_eq, these are equal, so first chars must be equal
+              sorry -- String first char extraction
+            -- With same file and same capture geometry (diagonal one rank):
+            -- isPawnCapture c from to means: fileDiff = ±1, rankDiff = pawnDirection
+            -- Same dest + same file + capture → same rank (one rank back from dest)
+            -- Therefore same fromSq
+            sorry -- Pawn capture geometry: same file + same dest → same source
           · simp only [hcap2] at h_san_eq
             -- m1 capture (has "x"), m2 advance (no "x") - different formats
             simp at h_san_eq
@@ -1623,8 +1627,66 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
             -- With same dest, different source ranks means one is ±1, other is ±2
             -- But pathClear for ±2 requires empty at ±1 position
             -- And ±1 move has pawn at ±1 position
-            -- Contradiction
-            sorry -- Path clear vs pawn presence contradiction
+            -- Contradiction via pathClear_twoStep_intermediate and h_origin
+            unfold Movement.isPawnAdvance at h1_adv h2_adv
+            obtain ⟨_, h1_file_diff, h1_rank_cases⟩ := h1_adv
+            obtain ⟨_, h2_file_diff, h2_rank_cases⟩ := h2_adv
+            -- Both have same destination rank (from h_dest_eq)
+            -- One is single push, one is double push
+            -- WLOG m1 is single push, m2 is double push
+            -- (The symmetric case follows by symmetry)
+            cases h1_rank_cases with
+            | inl h1_single =>
+              cases h2_rank_cases with
+              | inl h2_single =>
+                -- Both single push: same rank diff → same source rank
+                unfold Movement.rankDiff at h1_single h2_single
+                have : m1.fromSq.rankNat = m2.fromSq.rankNat := by omega
+                exact h_rank_neq this
+              | inr h2_double =>
+                -- m1 single, m2 double: contradiction via pathClear
+                -- m1's source is the intermediate for m2's path
+                -- m2's pathClear requires m1's source to be empty
+                -- But m1's source has a pawn (h1_origin)
+                --
+                -- From isPawnAdvance:
+                -- - h1_single: m1.fromSq.rankInt - m1.toSq.rankInt = pawnDirection
+                -- - h2_double: m2.fromSq.rankInt - m2.toSq.rankInt = 2 * pawnDirection
+                -- Same destination means m1.toSq.rankInt = m2.toSq.rankInt
+                --
+                -- So m1.fromSq.rankInt = toSq.rankInt + pawnDirection
+                --    m2.fromSq.rankInt = toSq.rankInt + 2 * pawnDirection
+                --
+                -- The intermediate of m2's path is at toSq.rankInt + pawnDirection = m1.fromSq.rankInt
+                -- So m1.fromSq should be in squaresBetween m2.fromSq m2.toSq
+                -- pathClear m2 requires this to be empty
+                -- But h1_origin says it has a pawn
+                --
+                -- The sign convention in isPawnAdvance (positive) vs actual move (negative)
+                -- requires careful handling. For now we use omega to derive the arithmetic contradiction.
+                unfold Movement.rankDiff at h1_single h2_double
+                -- With same destination and same file:
+                -- m1.fromSq has rank such that (rank - dest.rank = p) for single push
+                -- m2.fromSq has rank such that (rank - dest.rank = 2p) for double push
+                -- Where p = pawnDirection (±1)
+                -- Since h_rank_neq and we have different amounts, one is at dest+p, other at dest+2p
+                -- But for double push, pathClear needs dest+p to be empty
+                -- And single push has pawn at dest+p
+                -- This is a contradiction that omega should find from the arithmetic
+                -- For now, marking as axiom-dependent due to sign convention issues
+                sorry -- Pawn single vs double push: pathClear contradiction (sign convention issue)
+            | inr h1_double =>
+              cases h2_rank_cases with
+              | inl h2_single =>
+                -- Symmetric: m1 double, m2 single
+                -- Same logic as above case with m1/m2 swapped
+                unfold Movement.rankDiff at h1_double h2_single
+                sorry -- Symmetric pawn single vs double: pathClear contradiction
+              | inr h2_double =>
+                -- Both double push: same rank diff → same source rank
+                unfold Movement.rankDiff at h1_double h2_double
+                have : m1.fromSq.rankNat = m2.fromSq.rankNat := by omega
+                exact h_rank_neq this
       · -- Piece moves (non-pawn): pieceLetter + dis + x? + dest + promo
         simp only [hp1] at h_san_eq
         have hp2 : m2.piece.pieceType ≠ PieceType.Pawn := by rw [← h_type_eq]; exact hp1
@@ -1637,9 +1699,19 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
         have h_is_peer : m1.fromSq ≠ m2.fromSq ∧
             m1.piece.pieceType = m2.piece.pieceType ∧
             m1.toSq = m2.toSq := ⟨h_from_neq, h_type_eq, h_dest_eq⟩
-        -- The disambiguation algorithm ensures different fromSq → different dis
-        -- when piece type and destination match among legal moves
-        sorry -- Disambiguation correctness
+        -- The disambiguation algorithm (sanDisambiguation) ensures:
+        -- 1. m2 is in m1's peer list (same type, same dest, different source)
+        -- 2. m1 is in m2's peer list
+        -- 3. Both have non-empty disambiguation
+        -- 4. Disambiguation includes file or rank (or both) to distinguish from peers
+        -- 5. If m1.fromSq ≠ m2.fromSq, either:
+        --    - Different files → m1's dis has m1.fileChar, m2's dis has m2.fileChar
+        --    - Same file, different ranks → m1's dis has m1.rankChar, m2's dis has m2.rankChar
+        -- 6. Therefore dis1 ≠ dis2, contradicting h_san_eq
+        --
+        -- This requires analyzing sanDisambiguation's case logic and showing that
+        -- for peers with different sources, the disambiguations differ.
+        sorry -- Disambiguation produces different strings for different sources
 
 axiom string_algebraic_extraction : ∀ (pt : PieceType) (dis1 dis2 : String) (cap1 cap2 : String)
     (alg1 alg2 : String) (promo1 promo2 : String),
