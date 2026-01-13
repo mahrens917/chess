@@ -1485,10 +1485,56 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
     · -- Both castles with same SAN must have same source (king's initial position)
       -- The king starts on e1 (White) or e8 (Black), determined by color
       simp only [hc2] at h_san_eq
-      -- Castle moves have fixed source squares based on color
-      -- This is a property of legal castle moves - source is always e1/e8
-      -- For legal castles, fromSq is determined by toMove color
-      sorry -- Castle source uniqueness requires castle geometry
+      -- From fideLegal, both moves have respectsGeometry
+      have h1_fide := Completeness.allLegalMoves_sound gs m1 h1_legal
+      have h2_fide := Completeness.allLegalMoves_sound gs m2 h2_legal
+      have h1_geom := h1_fide.2.2.1
+      have h2_geom := h2_fide.2.2.1
+      -- For castle moves, respectsGeometry gives us cfg with kingFrom = fromSq
+      unfold respectsGeometry at h1_geom h2_geom
+      simp only [hc1, hc2, ite_true] at h1_geom h2_geom
+      obtain ⟨cfg1, hcfg1_from, hcfg1_to, hcfg1_type⟩ := h1_geom
+      obtain ⟨cfg2, hcfg2_from, hcfg2_to, hcfg2_type⟩ := h2_geom
+      -- Same SAN ("O-O" or "O-O-O") means same castle type
+      -- h_san_eq tells us the toSq file determines the castle type
+      -- toSq file 6 = kingside ("O-O"), toSq file 2 = queenside ("O-O-O")
+      -- From h_dest_eq, m1.toSq = m2.toSq, so same castle type
+      -- From fideLegal, both have piece.color = gs.toMove
+      have h1_color := h1_fide.1
+      have h2_color := h2_fide.1
+      -- Both configs are for the same color and same castle type
+      -- Since m1.toSq = m2.toSq and cfg.kingTo = m.toSq, cfg1.kingTo = cfg2.kingTo
+      rw [← hcfg1_to, ← hcfg2_to] at h_dest_eq
+      -- castleConfig is deterministic: same color + same kingTo → same config
+      -- kingTo determines kingSide (file 6 vs file 2)
+      -- So cfg1 = cfg2, hence cfg1.kingFrom = cfg2.kingFrom
+      -- Therefore m1.fromSq = m2.fromSq, contradicting h_from_neq
+      rw [← hcfg1_from, ← hcfg2_from]
+      -- Need to show cfg1.kingFrom = cfg2.kingFrom
+      -- Both cfgs are castleConfig for same color (gs.toMove via h1_color, h2_color)
+      -- and same side (determined by kingTo via h_dest_eq)
+      cases hcfg1_type with
+      | inl h1_ks =>
+        cases hcfg2_type with
+        | inl h2_ks =>
+          -- Both kingside: cfg1 = cfg2
+          rw [h1_ks, h2_ks, h1_color, h2_color]
+        | inr h2_qs =>
+          -- m1 kingside, m2 queenside - but same toSq, contradiction
+          rw [h1_ks, h2_qs] at h_dest_eq
+          -- kingside toSq has file 6, queenside has file 2
+          simp only [castleConfig] at h_dest_eq
+          cases m1.piece.color <;> cases m2.piece.color <;> simp [Square.mkUnsafe] at h_dest_eq
+      | inr h1_qs =>
+        cases hcfg2_type with
+        | inl h2_ks =>
+          -- m1 queenside, m2 kingside - but same toSq, contradiction
+          rw [h1_qs, h2_ks] at h_dest_eq
+          simp only [castleConfig] at h_dest_eq
+          cases m1.piece.color <;> cases m2.piece.color <;> simp [Square.mkUnsafe] at h_dest_eq
+        | inr h2_qs =>
+          -- Both queenside: cfg1 = cfg2
+          rw [h1_qs, h2_qs, h1_color, h2_color]
     · simp only [hc2] at h_san_eq
       -- m1 castle produces "O-O" or "O-O-O"
       -- m2 non-castle would produce different format
