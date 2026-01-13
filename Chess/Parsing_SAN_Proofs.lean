@@ -75,17 +75,18 @@ axiom pieceTargets_sets_piece (gs : GameState) (sq : Square) (p : Piece) (m : Mo
 
     **Proof sketch**: By case analysis on piece type:
     - King standard: filterMap constructs moves with { fromSq := src, ... }
-    - King castle: fromSq = cfg.kingFrom. In valid usage, sq = cfg.kingFrom (king at start)
+    - King castle: fromSq = cfg.kingFrom. With gs.board sq = some p and p a king,
+      the castle move's piece comes from cfg.kingFrom. Since there's one king per side,
+      if both sq and cfg.kingFrom have the king, sq = cfg.kingFrom.
     - Queen/Rook/Bishop: slidingTargets constructs moves with { fromSq := src, ... }
     - Knight: filterMap constructs moves with { fromSq := src, ... }
     - Pawn: all moves use { fromSq := src, ... }
 
-    The castle case holds because legalMovesForCached only calls pieceTargets
-    when gs.board sq = some p, so if p is a king and castling is possible,
-    sq must be the king start position (cfg.kingFrom).
+    The hypothesis gs.board sq = some p ensures proper behavior for castle case.
 
-    **Axiomatized**: Castle case requires reasoning about game state validity. -/
+    **Axiomatized**: Castle uniqueness (one king per side) is game-state property. -/
 axiom pieceTargets_sets_fromSq (gs : GameState) (sq : Square) (p : Piece) (m : Move) :
+    gs.board sq = some p →
     m ∈ Rules.pieceTargets gs sq p → m.fromSq = sq
 
 /-- Helper lemma: Moves in allLegalMoves have their piece at the origin square.
@@ -116,7 +117,7 @@ lemma allLegalMoves_originHasPiece (gs : GameState) (m : Move) :
         · simp only [List.mem_filter] at h_in_sq
           obtain ⟨⟨hpin, _⟩, _⟩ := h_in_sq
           -- pieceTargets sets fromSq = sq and piece = p
-          have hfromSq : m.fromSq = sq := pieceTargets_sets_fromSq gs sq p m hpin
+          have hfromSq : m.fromSq = sq := pieceTargets_sets_fromSq gs sq p m hboard hpin
           have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m hpin
           rw [hfromSq, hpiece]
           exact hboard
@@ -302,16 +303,30 @@ axiom parseSanToken_extracts_moveToSanBase (gs : GameState) (m : Move) (token : 
     Parsing.parseSanToken (Parsing.moveToSAN gs m) = Except.ok token →
     Parsing.moveToSanBase gs m = token.san
 
-/-- Helper axiom: Legal moves pass the pawn promotion rank check in moveFromSanToken.
+/-- Legal moves pass the pawn promotion rank check in moveFromSanToken.
     When m is legal (in allLegalMoves) and is a pawn promotion, the target square
     is at the correct promotion rank (by definition of legality).
-    **Justified by**: All pawn move tests pass; legal pawn promotions are by definition
-    on the correct rank (rank 8 for white, rank 1 for black). -/
-axiom legal_move_passes_promotion_rank_check (gs : GameState) (m : Move) :
+    Proof: fideLegal includes the constraint that promotion.isSome implies
+    toSq.rankNat = pawnPromotionRank (FIDE Article 3.7(e)). -/
+theorem legal_move_passes_promotion_rank_check (gs : GameState) (m : Move) :
     m ∈ Rules.allLegalMoves gs →
     (if m.piece.pieceType = PieceType.Pawn ∧ m.promotion.isSome then
       m.toSq.rankNat = Rules.pawnPromotionRank m.piece.color
-    else true)
+    else true) := by
+  intro h_legal
+  by_cases h_pawn : m.piece.pieceType = PieceType.Pawn ∧ m.promotion.isSome
+  · -- Pawn promotion case - need to show rank check passes
+    simp only [h_pawn, ite_true]
+    obtain ⟨h_is_pawn, h_has_promo⟩ := h_pawn
+    -- From legality, get fideLegal which includes promotion rank constraint
+    have h_fide : fideLegal gs m := Completeness.allLegalMoves_sound gs m h_legal
+    -- fideLegal includes: promotion.isSome → piece is Pawn ∧ toSq at promo rank
+    -- This is conjunct 8: .2.2.2.2.2.2.2.1 in the conjunction chain
+    have h_promo_rank := h_fide.2.2.2.2.2.2.2.1
+    -- Apply the implication to h_has_promo to get the rank equality
+    exact (h_promo_rank h_has_promo).2
+  · -- Non-promotion case - trivially true
+    simp only [h_pawn, ite_false]
 
 /-- Helper axiom: moveFromSanToken finds and returns a move from the filter.
     Given a legal move m whose SAN base was parsed into token,

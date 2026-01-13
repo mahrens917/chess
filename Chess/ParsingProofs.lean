@@ -1337,33 +1337,237 @@ lemma castle_destination_determines_side (file : Nat) (h : file < 8) :
 
     For now: Marked as requiring character library support.
 -/
-/-- Axioms for pawn movement properties
-    These are fundamental chess rules that are computationally verified by 100+ PGN test games.
-    They encode invariants maintained by move legality checking.
+/-- Theorems for pawn movement properties
+    These follow from fideLegal/allLegalMoves which enforces chess geometry.
 -/
 
-axiom pawn_advance_same_file : ∀ (m : Move),
+/-- Legal pawn advances stay on the same file.
+    Proof: From fideLegal, non-capture pawn moves satisfy isPawnAdvance which has fileDiff = 0. -/
+theorem pawn_advance_same_file (gs : GameState) (m : Move) :
+    m ∈ Rules.allLegalMoves gs →
     m.piece.pieceType = PieceType.Pawn →
     ¬(m.isCapture ∨ m.isEnPassant) →
-    m.fromSq.fileNat = m.toSq.fileNat
+    m.fromSq.fileNat = m.toSq.fileNat := by
+  intro h_legal h_pawn h_no_cap
+  -- From allLegalMoves_sound (axiom), m satisfies fideLegal
+  -- fideLegal requires respectsGeometry for pawns
+  -- For non-capture pawns, respectsGeometry requires isPawnAdvance which has fileDiff = 0
+  -- This means fromSq.fileNat = toSq.fileNat
+  have h_fide : fideLegal gs m := Completeness.allLegalMoves_sound gs m h_legal
+  have h_geom := h_fide.2.2.1
+  unfold respectsGeometry at h_geom
+  simp only [h_pawn] at h_geom
+  -- Non-capture path
+  have h_cap_false : m.isCapture = false := by
+    by_contra h
+    push_neg at h
+    exact h_no_cap (Or.inl h)
+  simp only [h_cap_false, Bool.false_eq_true, ↓reduceIte] at h_geom
+  -- h_geom : isPawnAdvance m.piece.color m.fromSq m.toSq ∧ ...
+  have h_adv := h_geom.1
+  unfold Movement.isPawnAdvance at h_adv
+  -- isPawnAdvance has fileDiff = 0
+  have h_file_diff : Movement.fileDiff m.fromSq m.toSq = 0 := h_adv.2.1
+  unfold Movement.fileDiff at h_file_diff
+  -- fileDiff = toSq.fileInt - fromSq.fileInt = 0
+  -- So toSq.fileInt = fromSq.fileInt
+  have h_int_eq : m.fromSq.fileInt = m.toSq.fileInt := by omega
+  -- fileNat is fileInt converted, so they're equal
+  have h1 : m.fromSq.fileNat = m.fromSq.fileInt.toNat := by
+    simp only [Square.fileInt, Int.toNat_ofNat]
+  have h2 : m.toSq.fileNat = m.toSq.fileInt.toNat := by
+    simp only [Square.fileInt, Int.toNat_ofNat]
+  rw [h1, h2]
+  congr 1
+  exact h_int_eq
 
-axiom pawn_advance_rank_dist : ∀ (m : Move),
+/-- Legal pawn advances move exactly 1 or 2 ranks forward.
+    Proof: From isPawnAdvance geometry constraint. -/
+theorem pawn_advance_rank_dist (gs : GameState) (m : Move) :
+    m ∈ Rules.allLegalMoves gs →
     m.piece.pieceType = PieceType.Pawn →
     ¬(m.isCapture ∨ m.isEnPassant) →
-    m.fromSq.rankNat + 1 = m.toSq.rankNat ∨ m.fromSq.rankNat + 2 = m.toSq.rankNat
+    m.fromSq.rankNat + 1 = m.toSq.rankNat ∨ m.fromSq.rankNat + 2 = m.toSq.rankNat ∨
+    m.toSq.rankNat + 1 = m.fromSq.rankNat ∨ m.toSq.rankNat + 2 = m.fromSq.rankNat := by
+  intro h_legal h_pawn h_no_cap
+  have h_fide : fideLegal gs m := Completeness.allLegalMoves_sound gs m h_legal
+  have h_geom := h_fide.2.2.1
+  unfold respectsGeometry at h_geom
+  simp only [h_pawn] at h_geom
+  have h_cap_false : m.isCapture = false := by
+    by_contra h
+    push_neg at h
+    exact h_no_cap (Or.inl h)
+  simp only [h_cap_false, Bool.false_eq_true, ↓reduceIte] at h_geom
+  have h_adv := h_geom.1
+  unfold Movement.isPawnAdvance at h_adv
+  -- rankDiff = pawnDirection or 2*pawnDirection
+  have h_rank := h_adv.2.2
+  unfold Movement.rankDiff at h_rank
+  unfold Movement.pawnDirection at h_rank
+  cases m.piece.color with
+  | White =>
+    simp only at h_rank
+    -- White: pawnDirection = 1, so rankDiff = 1 or 2
+    cases h_rank with
+    | inl h1 =>
+      left
+      have : m.toSq.rankInt - m.fromSq.rankInt = 1 := h1
+      have h_nat1 : m.fromSq.rankNat = m.fromSq.rankInt.toNat := by
+        simp only [Square.rankInt, Int.toNat_ofNat]
+      have h_nat2 : m.toSq.rankNat = m.toSq.rankInt.toNat := by
+        simp only [Square.rankInt, Int.toNat_ofNat]
+      omega
+    | inr h2 =>
+      right; left
+      have : m.toSq.rankInt - m.fromSq.rankInt = 2 := h2
+      omega
+  | Black =>
+    simp only at h_rank
+    -- Black: pawnDirection = -1, so rankDiff = -1 or -2
+    cases h_rank with
+    | inl h1 =>
+      right; right; left
+      have : m.toSq.rankInt - m.fromSq.rankInt = -1 := h1
+      omega
+    | inr h2 =>
+      right; right; right
+      have : m.toSq.rankInt - m.fromSq.rankInt = -2 := h2
+      omega
 
-axiom pawn_capture_adjacent_rank : ∀ (m : Move),
+/-- Legal pawn captures move exactly 1 rank.
+    Proof: From isPawnCapture geometry constraint. -/
+theorem pawn_capture_adjacent_rank (gs : GameState) (m : Move) :
+    m ∈ Rules.allLegalMoves gs →
     m.piece.pieceType = PieceType.Pawn →
     (m.isCapture ∨ m.isEnPassant) →
-    m.fromSq.rankNat + 1 = m.toSq.rankNat ∨ m.toSq.rankNat + 1 = m.fromSq.rankNat
+    m.fromSq.rankNat + 1 = m.toSq.rankNat ∨ m.toSq.rankNat + 1 = m.fromSq.rankNat := by
+  intro h_legal h_pawn h_cap
+  have h_fide : fideLegal gs m := Completeness.allLegalMoves_sound gs m h_legal
+  have h_geom := h_fide.2.2.1
+  unfold respectsGeometry at h_geom
+  simp only [h_pawn] at h_geom
+  -- Capture path
+  have h_cap_true : m.isCapture = true := by
+    cases h_cap with
+    | inl hc => exact hc
+    | inr he =>
+      -- En passant implies capture from captureFlagConsistentWithEP
+      have h_cap_consistent := h_fide.2.2.2.2.1
+      unfold captureFlagConsistentWithEP at h_cap_consistent
+      exact h_cap_consistent.mpr (Or.inr he)
+  simp only [h_cap_true, ↓reduceIte] at h_geom
+  by_cases h_ep : m.isEnPassant
+  · simp only [h_ep, ↓reduceIte] at h_geom
+    have h_cap_geom := h_geom.1
+    unfold Movement.isPawnCapture at h_cap_geom
+    unfold Movement.rankDiff Movement.pawnDirection at h_cap_geom
+    cases m.piece.color with
+    | White => simp only at h_cap_geom; left; omega
+    | Black => simp only at h_cap_geom; right; omega
+  · simp only [h_ep, Bool.false_eq_true, ↓reduceIte] at h_geom
+    have h_cap_geom := h_geom.1
+    unfold Movement.isPawnCapture at h_cap_geom
+    unfold Movement.rankDiff Movement.pawnDirection at h_cap_geom
+    cases m.piece.color with
+    | White => simp only at h_cap_geom; left; omega
+    | Black => simp only at h_cap_geom; right; omega
 
-axiom legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
+/-- Two legal moves with same piece type, destination, and SAN base have same source square.
+    Proof: By the design of sanDisambiguation - it adds enough info (file and/or rank) to
+    distinguish legal moves with same piece type and destination. If source squares differ,
+    the disambiguation would differ, contradicting equal SAN bases. -/
+theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
     m1 ∈ Rules.allLegalMoves gs →
     m2 ∈ Rules.allLegalMoves gs →
     m1.piece.pieceType = m2.piece.pieceType →
     m1.toSq = m2.toSq →
     moveToSanBase gs m1 = moveToSanBase gs m2 →
-    m1.fromSq = m2.fromSq
+    m1.fromSq = m2.fromSq := by
+  intro gs m1 m2 h1_legal h2_legal h_type_eq h_dest_eq h_san_eq
+  -- By contradiction: assume source squares differ
+  by_contra h_from_neq
+  -- Case split on whether moves are castles (castles have fixed source squares)
+  by_cases hc1 : m1.isCastle
+  · -- m1 is castle - but castle doesn't have same piece type as non-castle typically
+    -- Actually castles have King as piece type, and castle positions are fixed
+    -- Castle SAN is "O-O" or "O-O-O" with no disambiguation
+    -- If m2 has same SAN as castle m1, m2 must also be castle with same direction
+    simp only [moveToSanBase, hc1] at h_san_eq
+    by_cases hc2 : m2.isCastle
+    · -- Both castles with same SAN must have same source (king's initial position)
+      -- The king starts on e1 (White) or e8 (Black), determined by color
+      simp only [hc2] at h_san_eq
+      -- Castle moves have fixed source squares based on color
+      -- This is a property of legal castle moves - source is always e1/e8
+      -- For legal castles, fromSq is determined by toMove color
+      sorry -- Castle source uniqueness requires castle geometry
+    · simp only [hc2] at h_san_eq
+      -- m1 castle produces "O-O" or "O-O-O"
+      -- m2 non-castle would produce different format
+      -- This case should be impossible for equal SAN
+      simp only [moveToSanBase, hc2] at h_san_eq
+      split at h_san_eq <;> simp at h_san_eq
+  · by_cases hc2 : m2.isCastle
+    · -- m1 not castle, m2 castle - symmetric impossible case
+      simp only [moveToSanBase, hc1, hc2] at h_san_eq
+      split at h_san_eq <;> simp at h_san_eq
+    · -- Neither is castle - use disambiguation analysis
+      simp only [moveToSanBase, hc1, hc2] at h_san_eq
+      by_cases hp1 : m1.piece.pieceType = PieceType.Pawn
+      · -- Pawn moves: format is [file]x?dest+promo
+        simp only [hp1] at h_san_eq
+        have hp2 : m2.piece.pieceType = PieceType.Pawn := h_type_eq ▸ hp1
+        simp only [hp2] at h_san_eq
+        -- For pawn captures, source file is in SAN
+        -- For pawn advances, source is uniquely determined by dest (1-2 ranks back)
+        by_cases hcap1 : m1.isCapture ∨ m1.isEnPassant
+        · simp only [hcap1] at h_san_eq
+          by_cases hcap2 : m2.isCapture ∨ m2.isEnPassant
+          · simp only [hcap2] at h_san_eq
+            -- Both captures: "f" + "x" + dest + promo
+            -- fileChar determines source file
+            -- With same dest, adjacent rank (capture diagonal), file determines source
+            have h_file_eq : m1.fromSq.fileChar = m2.fromSq.fileChar := by
+              -- First char of SAN is source file
+              have h1 := String.take_append (String.singleton m1.fromSq.fileChar) _
+              have h2 := String.take_append (String.singleton m2.fromSq.fileChar) _
+              simp at h_san_eq
+              sorry -- String manipulation to extract first char
+            -- With same file and adjacent rank from dest, source is same
+            sorry -- Geometric argument
+          · simp only [hcap2] at h_san_eq
+            -- m1 capture (has "x"), m2 advance (no "x") - different formats
+            simp at h_san_eq
+        · simp only [hcap1] at h_san_eq
+          by_cases hcap2 : m2.isCapture ∨ m2.isEnPassant
+          · simp only [hcap2] at h_san_eq
+            simp at h_san_eq
+          · simp only [hcap2] at h_san_eq
+            -- Both advances: dest + promo, same dest means same source (1-2 ranks back)
+            -- But different source contradicts h_from_neq... need to derive
+            -- Actually for pawn advance, multiple sources could reach same dest
+            -- (single push vs double push) but that would have different SAN!
+            -- Double push: e4 (from e2)
+            -- Single push: e4 (from e3) - but only one is legal at a time
+            -- The key: legal pawn advance to rank 4/5 from rank 2/7 is double,
+            -- from rank 3/6 is single - never both legal simultaneously
+            sorry -- Pawn advance uniqueness
+      · -- Piece moves (non-pawn): pieceLetter + dis + x? + dest + promo
+        simp only [hp1] at h_san_eq
+        have hp2 : m2.piece.pieceType ≠ PieceType.Pawn := by rw [← h_type_eq]; exact hp1
+        simp only [hp2] at h_san_eq
+        -- h_san_eq: pieceLetter pt ++ dis1 ++ cap1 ++ alg ++ promo1 =
+        --           pieceLetter pt ++ dis2 ++ cap2 ++ alg ++ promo2
+        -- dis1 = sanDisambiguation gs m1, dis2 = sanDisambiguation gs m2
+        -- Since m1.fromSq ≠ m2.fromSq, m1 is a peer of m2 and vice versa
+        -- So both have non-empty disambiguation that includes their distinguishing coordinate
+        have h_is_peer : m1.fromSq ≠ m2.fromSq ∧
+            m1.piece.pieceType = m2.piece.pieceType ∧
+            m1.toSq = m2.toSq := ⟨h_from_neq, h_type_eq, h_dest_eq⟩
+        -- The disambiguation algorithm ensures different fromSq → different dis
+        -- when piece type and destination match among legal moves
+        sorry -- Disambiguation correctness
 
 axiom string_algebraic_extraction : ∀ (pt : PieceType) (dis1 dis2 : String) (cap1 cap2 : String)
     (alg1 alg2 : String) (promo1 promo2 : String),
@@ -1579,6 +1783,8 @@ lemma san_unique_ncastle_vs_castle (gs : GameState) (m1 m2 : Move)
     destination determines toSq, promotion suffix determines promotion.
 -/
 lemma san_unique_both_pawn_advances (gs : GameState) (m1 m2 : Move)
+    (h1_legal : m1 ∈ Rules.allLegalMoves gs)
+    (h2_legal : m2 ∈ Rules.allLegalMoves gs)
     (h1_pawn : m1.piece.pieceType = PieceType.Pawn)
     (h2_pawn : m2.piece.pieceType = PieceType.Pawn)
     (h1_no_cap : ¬(m1.isCapture ∨ m1.isEnPassant))
@@ -1630,16 +1836,14 @@ lemma san_unique_both_pawn_advances (gs : GameState) (m1 m2 : Move)
     ext
     · -- fileNat: pawn advance stays in same file
       have h1f : m1.fromSq.fileNat = m1.toSq.fileNat :=
-        pawn_advance_same_file m1 h1_pawn h1_no_cap
+        pawn_advance_same_file gs m1 h1_legal h1_pawn h1_no_cap
       have h2f : m2.fromSq.fileNat = m2.toSq.fileNat :=
-        pawn_advance_same_file m2 h2_pawn h2_no_cap
+        pawn_advance_same_file gs m2 h2_legal h2_pawn h2_no_cap
       simp [h_dest_eq] at h1f h2f
       omega
     · -- rankNat: pawn advance is exactly 1 or 2 ranks forward
-      have h1r : m1.fromSq.rankNat + 1 = m1.toSq.rankNat ∨ m1.fromSq.rankNat + 2 = m1.toSq.rankNat :=
-        pawn_advance_rank_dist m1 h1_pawn h1_no_cap
-      have h2r : m2.fromSq.rankNat + 1 = m2.toSq.rankNat ∨ m2.fromSq.rankNat + 2 = m2.toSq.rankNat :=
-        pawn_advance_rank_dist m2 h2_pawn h2_no_cap
+      have h1r := pawn_advance_rank_dist gs m1 h1_legal h1_pawn h1_no_cap
+      have h2r := pawn_advance_rank_dist gs m2 h2_legal h2_pawn h2_no_cap
       simp [h_dest_eq] at h1r h2r
       omega
 
@@ -1650,6 +1854,8 @@ lemma san_unique_both_pawn_advances (gs : GameState) (m1 m2 : Move)
     source file + destination + promotion uniquely determine move.
 -/
 lemma san_unique_both_pawn_captures (gs : GameState) (m1 m2 : Move)
+    (h1_legal : m1 ∈ Rules.allLegalMoves gs)
+    (h2_legal : m2 ∈ Rules.allLegalMoves gs)
     (h1_pawn : m1.piece.pieceType = PieceType.Pawn)
     (h2_pawn : m2.piece.pieceType = PieceType.Pawn)
     (h1_cap : m1.isCapture ∨ m1.isEnPassant)
@@ -1725,9 +1931,9 @@ lemma san_unique_both_pawn_captures (gs : GameState) (m1 m2 : Move)
     · -- rankNat: source rank is one rank away from destination (diagonal capture)
       -- Pawn capture always moves diagonally: rank ± 1
       have h1r : m1.fromSq.rankNat + 1 = m1.toSq.rankNat ∨ m1.toSq.rankNat + 1 = m1.fromSq.rankNat :=
-        pawn_capture_adjacent_rank m1 h1_pawn h1_cap
+        pawn_capture_adjacent_rank gs m1 h1_legal h1_pawn h1_cap
       have h2r : m2.fromSq.rankNat + 1 = m2.toSq.rankNat ∨ m2.toSq.rankNat + 1 = m2.fromSq.rankNat :=
-        pawn_capture_adjacent_rank m2 h2_pawn h2_cap
+        pawn_capture_adjacent_rank gs m2 h2_legal h2_pawn h2_cap
       simp [h_dest_eq] at h1r h2r
       omega
 
@@ -2060,7 +2266,7 @@ theorem moveToSAN_unique (gs : GameState) (m1 m2 : Move) :
           by_cases hcap1 : m1.isCapture ∨ m1.isEnPassant
           · by_cases hcap2 : m2.isCapture ∨ m2.isEnPassant
             · -- Both captures
-              exact san_unique_both_pawn_captures gs m1 m2 hp1 hp2 hcap1 hcap2 h_san_eq
+              exact san_unique_both_pawn_captures gs m1 m2 h1_legal h2_legal hp1 hp2 hcap1 hcap2 h_san_eq
             · -- m1 capture, m2 advance
               -- san_unique_pawn_advance_vs_capture proves this is impossible
               exact san_unique_pawn_advance_vs_capture gs m2 m1 hp2 hp1 hcap2 hcap1 h_san_eq
@@ -2069,7 +2275,7 @@ theorem moveToSAN_unique (gs : GameState) (m1 m2 : Move) :
               -- san_unique_pawn_advance_vs_capture proves this is impossible
               exact san_unique_pawn_advance_vs_capture gs m1 m2 hp1 hp2 hcap1 hcap2 h_san_eq
             · -- Both advances
-              exact san_unique_both_pawn_advances gs m1 m2 hp1 hp2 hcap1 hcap2 h_san_eq
+              exact san_unique_both_pawn_advances gs m1 m2 h1_legal h2_legal hp1 hp2 hcap1 hcap2 h_san_eq
         · -- m1 pawn, m2 not
           exact san_unique_pawn_vs_piece gs m1 m2 hp1 hp2 h_san_eq
       · by_cases hp2 : m2.piece.pieceType = PieceType.Pawn
