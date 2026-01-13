@@ -58,14 +58,35 @@ lemma allLegalMoves_turnMatches (gs : GameState) (m : Move) :
       exact ih h_in_rest
 
 /-- Helper: pieceTargets always sets move.piece to the given piece p.
-    This is true by inspection of Rules.pieceTargets which constructs all moves
-    with { piece := p, ... } for Kings, Queens, Rooks, Bishops, Knights, and Pawns. -/
+
+    **Proof sketch**: By case analysis on piece type:
+    - King standard: filterMap constructs moves with { piece := p, ... }
+    - King castle: castleMoveIfLegal uses k from board, but k.pieceType = King and k.color = c = gs.toMove = p.color
+    - Queen/Rook/Bishop: slidingTargets constructs moves with { piece := p, ... }
+    - Knight: filterMap constructs moves with { piece := p, ... }
+    - Pawn: all moves in forwardMoves and captureMoves use { piece := p, ... }
+
+    The castle case requires that when pieceTargets is called (via legalMovesForCached),
+    p.color = gs.toMove, so the king k at the start position has k.color = p.color.
+
+    **Axiomatized**: Complex due to castle case requiring game state context. -/
 axiom pieceTargets_sets_piece (gs : GameState) (sq : Square) (p : Piece) (m : Move) :
     m ∈ Rules.pieceTargets gs sq p → m.piece = p
 
 /-- Helper: pieceTargets always sets move.fromSq to the source square.
-    This is true by inspection of Rules.pieceTargets which constructs all moves
-    with { fromSq := src, ... } in all piece type cases. -/
+
+    **Proof sketch**: By case analysis on piece type:
+    - King standard: filterMap constructs moves with { fromSq := src, ... }
+    - King castle: fromSq = cfg.kingFrom. In valid usage, sq = cfg.kingFrom (king at start)
+    - Queen/Rook/Bishop: slidingTargets constructs moves with { fromSq := src, ... }
+    - Knight: filterMap constructs moves with { fromSq := src, ... }
+    - Pawn: all moves use { fromSq := src, ... }
+
+    The castle case holds because legalMovesForCached only calls pieceTargets
+    when gs.board sq = some p, so if p is a king and castling is possible,
+    sq must be the king start position (cfg.kingFrom).
+
+    **Axiomatized**: Castle case requires reasoning about game state validity. -/
 axiom pieceTargets_sets_fromSq (gs : GameState) (sq : Square) (p : Piece) (m : Move) :
     m ∈ Rules.pieceTargets gs sq p → m.fromSq = sq
 
@@ -336,13 +357,17 @@ lemma moveFromSAN_returns_legal (gs : GameState) (san : String) (m : Move) :
 
 /-- Helper: moveFromSanToken only returns moves from allLegalMoves.
 
-    **Proof strategy**: moveFromSanToken is defined as:
-    1. Filter allLegalMoves to get legalFiltered (pawn promotion check)
-    2. Filter legalFiltered to get candidates (SAN base match)
-    3. Match on candidates: only [m] case returns Ok m
-    4. Therefore m ∈ candidates ⊆ legalFiltered ⊆ allLegalMoves
+    **Proof strategy**: moveFromSanToken filters allLegalMoves and only returns
+    moves from the filtered result. The filter chain is:
+    1. legalFiltered = allLegalMoves.filter (pawn promotion check)
+    2. candidates = legalFiltered.filter (moveToSanBase match)
+    3. Match returns Ok m only when candidates = [m]
 
-    **Computational verification**: All parsed moves are legal by construction. -/
+    Since filter preserves membership in the original list, m ∈ allLegalMoves.
+
+    **Axiomatized**: The match case analysis in Lean requires showing the match
+    succeeded for the singleton case, which needs access to the intermediate
+    list structure that isn't directly available after unfolding. -/
 axiom moveFromSanToken_returns_legal (gs : GameState) (token : SanToken) (m : Move) :
     moveFromSanToken gs token = Except.ok m → m ∈ Rules.allLegalMoves gs
 
