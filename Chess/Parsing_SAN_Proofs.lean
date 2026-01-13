@@ -59,17 +59,15 @@ lemma allLegalMoves_turnMatches (gs : GameState) (m : Move) :
 
 /-- Helper: pieceTargets always sets move.piece to the given piece p.
 
-    **Proof sketch**: By case analysis on piece type:
+    Proof outline by case analysis on piece type:
     - King standard: filterMap constructs moves with { piece := p, ... }
-    - King castle: castleMoveIfLegal uses k from board, but k.pieceType = King and k.color = c = gs.toMove = p.color
+    - King castle: castleMoveIfLegal uses k from board with k.pieceType = King ∧ k.color = gs.toMove.
+      When p.color = gs.toMove (as in legalMovesForCached), p and k have same type and color, so p = k.
     - Queen/Rook/Bishop: slidingTargets constructs moves with { piece := p, ... }
     - Knight: filterMap constructs moves with { piece := p, ... }
-    - Pawn: all moves in forwardMoves and captureMoves use { piece := p, ... }
+    - Pawn: all moves use { piece := p, ... }
 
-    The castle case requires that when pieceTargets is called (via legalMovesForCached),
-    p.color = gs.toMove, so the king k at the start position has k.color = p.color.
-
-    **Axiomatized**: Complex due to castle case requiring game state context. -/
+    Axiomatized because the castle case requires p.color = gs.toMove context from calling code. -/
 axiom pieceTargets_sets_piece (gs : GameState) (sq : Square) (p : Piece) (m : Move) :
     m ∈ Rules.pieceTargets gs sq p → m.piece = p
 
@@ -363,13 +361,44 @@ lemma moveFromSAN_returns_legal (gs : GameState) (san : String) (m : Move) :
     2. candidates = legalFiltered.filter (moveToSanBase match)
     3. Match returns Ok m only when candidates = [m]
 
-    Since filter preserves membership in the original list, m ∈ allLegalMoves.
-
-    **Axiomatized**: The match case analysis in Lean requires showing the match
-    succeeded for the singleton case, which needs access to the intermediate
-    list structure that isn't directly available after unfolding. -/
-axiom moveFromSanToken_returns_legal (gs : GameState) (token : SanToken) (m : Move) :
-    moveFromSanToken gs token = Except.ok m → m ∈ Rules.allLegalMoves gs
+    Since filter preserves membership in the original list, m ∈ allLegalMoves. -/
+theorem moveFromSanToken_returns_legal (gs : GameState) (token : SanToken) (m : Move) :
+    moveFromSanToken gs token = Except.ok m → m ∈ Rules.allLegalMoves gs := by
+  intro hparse
+  unfold moveFromSanToken at hparse
+  -- hparse tells us the function returned Ok m
+  -- This only happens in the [m] branch of the match
+  simp only at hparse
+  -- Extract the filter chain
+  let legal := Rules.allLegalMoves gs
+  let legalFiltered := legal.filter fun m' =>
+    if m'.piece.pieceType = PieceType.Pawn ∧ m'.promotion.isSome then
+      m'.toSq.rankNat = Rules.pawnPromotionRank m'.piece.color
+    else true
+  let candidates := legalFiltered.filter (fun m' => Parsing.moveToSanBase gs m' = token.san)
+  -- The match on candidates must have been [m] for Ok m to be returned
+  -- In all other cases ([], multiple), Except.error is returned
+  match h_cand : candidates with
+  | [] =>
+    simp only [h_cand] at hparse
+  | [m'] =>
+    simp only [h_cand] at hparse
+    -- validateCheckHint returns Ok () or Err, so hparse.1 gives us m = m'
+    -- Actually hparse has type Except.ok m from the do block
+    have h_m_eq : m = m' := by
+      simp only [Except.bind, pure] at hparse
+      split at hparse
+      · injection hparse
+      · contradiction
+    rw [h_m_eq]
+    -- m' ∈ candidates, candidates ⊆ legalFiltered ⊆ legal
+    have h_in_cand : m' ∈ candidates := by
+      rw [h_cand]
+      exact List.mem_singleton.mpr rfl
+    have h_in_filtered : m' ∈ legalFiltered := List.mem_of_mem_filter h_in_cand
+    exact List.mem_of_mem_filter h_in_filtered
+  | _ :: _ :: _ =>
+    simp only [h_cand] at hparse
 
 -- Theorem: Castling SAN strings are normalized
 theorem parseSanToken_normalizes_castling (token : String) :
