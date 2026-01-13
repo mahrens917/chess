@@ -61,9 +61,12 @@ def isKnightMoveBool (source target : Square) : Bool :=
 def pawnDirection (c : Color) : Int :=
   if c = Color.White then 1 else -1
 
+-- Note: rankDiff = source - target, so for forward movement (target ahead of source):
+-- White: target.rank > source.rank → rankDiff < 0, pawnDirection = 1 → use negative
+-- Black: target.rank < source.rank → rankDiff > 0, pawnDirection = -1 → use negative
 def isPawnAdvance (c : Color) (source target : Square) : Prop :=
   source ≠ target ∧ fileDiff source target = 0 ∧
-    (rankDiff source target = pawnDirection c ∨ rankDiff source target = 2 * pawnDirection c)
+    (rankDiff source target = -pawnDirection c ∨ rankDiff source target = -2 * pawnDirection c)
 
 def isPawnCapture (c : Color) (source target : Square) : Prop :=
   source ≠ target ∧ absInt (fileDiff source target) = 1 ∧ rankDiff source target = pawnDirection c
