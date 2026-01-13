@@ -115,9 +115,15 @@ def GameLine.toMoveList : {gs : GameState} → {n : Nat} → GameLine gs n → L
 -- these properties with clear specifications.
 -- ==============================================================================
 
-/-- Helper axiom: Square.algebraic is injective.
-    TODO: This proof has bitrot from Lean4 API changes. Needs updating to use current Std library.
-    For now, axiomatized since it's not critical for perft correctness proofs. -/
+/-- Square.algebraic is injective: distinct squares have distinct algebraic notations.
+
+    Proof sketch: algebraic = fileChar.toString ++ toString(rankNat + 1)
+    - File char is 'a' + fileNat, uniquely determined by first character
+    - Rank is the remaining digit(s), uniquely determined by rest of string
+    - Both components are injective, so the combination is injective
+
+    This is structurally true but requires tedious string manipulation lemmas.
+    Axiomatized for pragmatic reasons. -/
 axiom Square.algebraic_injective {s₁ s₂ : Square} :
     s₁.algebraic = s₂.algebraic → s₁ = s₂
 
