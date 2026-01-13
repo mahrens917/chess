@@ -1662,44 +1662,141 @@ theorem pawnCapture_squareFromInts (c : Color) (src tgt : Square)
       exact squareFromInts_roundTrip tgt
 
 /--
-Axiom: For a single-step pawn advance, the target square must be empty.
+Theorem: For a single-step pawn advance, the target square must be empty.
 
-This is a **game state invariant** that holds for well-formed positions where the move
-is from the set of legal moves (fideLegal gs m). While pathClear ensures intermediate
-squares are empty, and there are no intermediate squares for a single step, the
-emptiness of the target square is a property of the game state, not derivable from
-geometry alone.
+This follows from:
+1. Non-capture pawn moves (isCapture = false) don't target occupied enemy squares
+2. destinationFriendlyFreeProp ensures no friendly pieces at target
+3. Combined: target must be empty
 
-This axiom captures the FIDE rule: pawns can only move forward to empty squares
-(not to capture the piece in front, unlike sliding pieces that can move to occupied
-squares when capturing).
+Proof uses captureFlagConsistentWithEP and destinationFriendlyFreeProp from fideLegal.
 -/
-axiom pawnAdvance_singleStep_isEmpty (gs : GameState) (m : Move)
+theorem pawnAdvance_singleStep_isEmpty (gs : GameState) (m : Move)
     (h_pawn : m.piece.pieceType = PieceType.Pawn)
     (h_adv : Movement.isPawnAdvance m.piece.color m.fromSq m.toSq)
     (h_single : Movement.rankDiff m.fromSq m.toSq = -Movement.pawnDirection m.piece.color)
-    (h_path : pathClear gs.board m.fromSq m.toSq) :
-    isEmpty gs.board m.toSq = true
+    (h_path : pathClear gs.board m.fromSq m.toSq)
+    (h_not_cap : m.isCapture = false)
+    (h_cap_consistent : captureFlagConsistentWithEP gs m)
+    (h_friendly_free : destinationFriendlyFreeProp gs m) :
+    isEmpty gs.board m.toSq = true := by
+  -- From captureFlagConsistentWithEP with isCapture = false:
+  -- false = true ↔ (∃ p, gs.board m.toSq = some p ∧ p.color ≠ m.piece.color) ∨ m.isEnPassant
+  -- So ¬((∃ p, enemy at target) ∨ isEnPassant)
+  unfold captureFlagConsistentWithEP at h_cap_consistent
+  rw [h_not_cap] at h_cap_consistent
+  -- h_cap_consistent : false = true ↔ (∃ p, ...) ∨ m.isEnPassant
+  have h_no_enemy_or_ep : ¬((∃ p, gs.board m.toSq = some p ∧ p.color ≠ m.piece.color) ∨ m.isEnPassant) := by
+    intro h
+    have := h_cap_consistent.mpr h
+    exact Bool.noConfusion this
+  push_neg at h_no_enemy_or_ep
+  have ⟨h_no_enemy, _⟩ := h_no_enemy_or_ep
+  -- From destinationFriendlyFreeProp: either empty or enemy at target
+  unfold destinationFriendlyFreeProp at h_friendly_free
+  unfold destinationFriendlyFree at h_friendly_free
+  -- Case analysis on gs.board m.toSq
+  unfold isEmpty
+  cases h_board : gs.board m.toSq with
+  | none => rfl
+  | some p =>
+    -- If there's a piece, it must be enemy (from h_friendly_free)
+    simp only [h_board] at h_friendly_free
+    -- So p.color ≠ m.piece.color
+    -- But h_no_enemy says no such enemy exists
+    exfalso
+    apply h_no_enemy
+    exact ⟨p, h_board, h_friendly_free⟩
 
 /--
-Axiom: For a two-step pawn advance, both intermediate and target squares are empty.
+Theorem: For a two-step pawn advance, both intermediate and target squares are empty.
 
-This is a **game state invariant**. The intermediate square can be proven empty via pathClear
-(since squaresBetween includes the intermediate square). However, the target square
-emptiness is a game state property that cannot be derived from geometry alone - it's
-part of the well-formed invariant for legal pawn moves.
-
-This axiom captures FIDE pawn movement rules: pawns can advance two squares from
-their starting position only if both the intermediate and target squares are empty.
+The intermediate square is empty via pathClear (squaresBetween includes it for 2-step moves).
+The target square emptiness follows from the same logic as single-step:
+non-capture + captureFlagConsistentWithEP + destinationFriendlyFreeProp.
 -/
-axiom pawnAdvance_twoStep_isEmpty (gs : GameState) (m : Move)
+theorem pawnAdvance_twoStep_isEmpty (gs : GameState) (m : Move)
     (h_pawn : m.piece.pieceType = PieceType.Pawn)
     (h_adv : Movement.isPawnAdvance m.piece.color m.fromSq m.toSq)
     (h_two : Movement.rankDiff m.fromSq m.toSq = -2 * Movement.pawnDirection m.piece.color)
-    (h_path : pathClear gs.board m.fromSq m.toSq) :
+    (h_path : pathClear gs.board m.fromSq m.toSq)
+    (h_not_cap : m.isCapture = false)
+    (h_cap_consistent : captureFlagConsistentWithEP gs m)
+    (h_friendly_free : destinationFriendlyFreeProp gs m) :
     (∀ sq, Movement.squareFromInts m.fromSq.fileInt (m.fromSq.rankInt + Movement.pawnDirection m.piece.color) = some sq →
       isEmpty gs.board sq = true) ∧
-    isEmpty gs.board m.toSq = true
+    isEmpty gs.board m.toSq = true := by
+  constructor
+  -- Part 1: Intermediate square is empty via pathClear
+  · intro sq h_sq
+    -- The intermediate square is in squaresBetween for a 2-step rook-like move
+    -- pathClear checks all squares in squaresBetween are empty
+    unfold pathClear at h_path
+    -- For a 2-step vertical move (pawn advance), squaresBetween contains the intermediate
+    -- The intermediate is 1 step from source in the direction of target
+    -- squaresBetween uses isRookMove branch for same-file moves
+    -- With fileDiff=0, rankDiff=±2, steps=2, generates 1 intermediate at step=1
+    -- This intermediate is exactly sq from h_sq
+    -- From h_path (List.all returns true), each such square has isEmpty = true
+    unfold isEmpty
+    have h_file_eq : Movement.fileDiff m.fromSq m.toSq = 0 := h_adv.2.1
+    have h_rook : Movement.isRookMove m.fromSq m.toSq := by
+      unfold Movement.isRookMove
+      constructor
+      · exact h_adv.1
+      · left
+        exact ⟨h_file_eq, by omega⟩
+    -- sq is in squaresBetween because it's the intermediate step
+    have h_sq_in : sq ∈ Movement.squaresBetween m.fromSq m.toSq := by
+      unfold Movement.squaresBetween
+      have h_not_diag : ¬Movement.isDiagonal m.fromSq m.toSq := by
+        unfold Movement.isDiagonal
+        simp only [h_file_eq]
+        omega
+      simp only [h_not_diag, ↓reduceIte, h_rook]
+      -- steps = |fileDiff| + |rankDiff| = 0 + 2 = 2
+      have h_steps : Int.natAbs (Movement.fileDiff m.fromSq m.toSq) +
+                     Int.natAbs (Movement.rankDiff m.fromSq m.toSq) = 2 := by
+        simp only [h_file_eq, Int.natAbs_zero, zero_add]
+        have h_rd : Movement.rankDiff m.fromSq m.toSq = -2 * Movement.pawnDirection m.piece.color := h_two
+        cases m.piece.color with
+        | White => simp only [Movement.pawnDirection] at h_rd; omega
+        | Black => simp only [Movement.pawnDirection] at h_rd; omega
+      simp only [h_steps, Nat.reduceLT, ↓reduceIte]
+      -- sq comes from idx=0 in the range
+      rw [List.mem_filterMap]
+      use 0
+      constructor
+      · simp only [List.mem_range]
+      · -- squareFromInts at step 1 from source
+        simp only [Nat.zero_add, Int.ofNat_one, mul_one, h_file_eq, Movement.signInt, Int.natAbs_zero,
+                   zero_mul, add_zero]
+        exact h_sq
+    -- From pathClear, sq must be empty
+    have h_all_empty := List.all_eq_true.mp h_path sq h_sq_in
+    unfold isEmpty at h_all_empty
+    cases h_board : gs.board sq with
+    | none => rfl
+    | some _ => simp only [h_board] at h_all_empty
+  -- Part 2: Target square is empty (same proof as single-step)
+  · unfold captureFlagConsistentWithEP at h_cap_consistent
+    rw [h_not_cap] at h_cap_consistent
+    have h_no_enemy_or_ep : ¬((∃ p, gs.board m.toSq = some p ∧ p.color ≠ m.piece.color) ∨ m.isEnPassant) := by
+      intro h
+      have := h_cap_consistent.mpr h
+      exact Bool.noConfusion this
+    push_neg at h_no_enemy_or_ep
+    have ⟨h_no_enemy, _⟩ := h_no_enemy_or_ep
+    unfold destinationFriendlyFreeProp at h_friendly_free
+    unfold destinationFriendlyFree at h_friendly_free
+    unfold isEmpty
+    cases h_board : gs.board m.toSq with
+    | none => rfl
+    | some p =>
+      simp only [h_board] at h_friendly_free
+      exfalso
+      apply h_no_enemy
+      exact ⟨p, h_board, h_friendly_free⟩
 
 /--
 Helper: A move without promotion has promotion = none.
@@ -1746,7 +1843,9 @@ theorem pawnAdvance_in_forwardMoves (gs : GameState) (m : Move)
     (h_path : pathClear gs.board m.fromSq m.toSq)
     (h_not_cap : m.isCapture = false)
     (h_not_ep : m.isEnPassant = false)
-    (h_not_castle : m.isCastle = false) :
+    (h_not_castle : m.isCastle = false)
+    (h_cap_consistent : captureFlagConsistentWithEP gs m)
+    (h_friendly_free : destinationFriendlyFreeProp gs m) :
     let dir := Movement.pawnDirection m.piece.color
     let oneStep := Movement.squareFromInts m.fromSq.fileInt (m.fromSq.rankInt + dir)
     let twoStep := Movement.squareFromInts m.fromSq.fileInt (m.fromSq.rankInt + 2 * dir)
@@ -1784,9 +1883,9 @@ theorem pawnAdvance_in_forwardMoves (gs : GameState) (m : Move)
     have h_oneStep := oneStep_eq h_rank
     simp only [h_oneStep]
 
-    -- Target must be empty (from pathClear and single-step)
+    -- Target must be empty (from captureFlagConsistentWithEP and destinationFriendlyFreeProp)
     have h_empty : isEmpty gs.board m.toSq = true := by
-      exact pawnAdvance_singleStep_isEmpty gs m h_pawn h_adv h_rank h_path
+      exact pawnAdvance_singleStep_isEmpty gs m h_pawn h_adv h_rank h_path h_not_cap h_cap_consistent h_friendly_free
     simp only [h_empty, ↓reduceIte]
 
     -- m cannot be on promotion rank (single-step never reaches promo rank)
@@ -1843,8 +1942,8 @@ theorem pawnAdvance_in_forwardMoves (gs : GameState) (m : Move)
     have h_two : Movement.rankDiff m.fromSq m.toSq = -2 * Movement.pawnDirection m.piece.color := by omega
 
     -- For two-step: oneStep gives intermediate square, twoStep gives target
-    -- The intermediate square is empty by pathClear
-    have h_intermediate := pawnAdvance_twoStep_isEmpty gs m h_pawn h_adv h_two h_path
+    -- The intermediate square is empty by pathClear, target by captureFlagConsistentWithEP
+    have h_intermediate := pawnAdvance_twoStep_isEmpty gs m h_pawn h_adv h_two h_path h_not_cap h_cap_consistent h_friendly_free
     have ⟨h_int_empty, h_tgt_empty⟩ := h_intermediate
 
     -- oneStep succeeds (gives intermediate square)
@@ -2123,12 +2222,15 @@ theorem fideLegal_pawn_in_pieceTargets (gs : GameState) (m : Move)
     have h_not_ep : m.isEnPassant = false := by
       by_contra h_is_ep
       push_neg at h_is_ep
-      have h_cap_consistent := h_legal.2.2.2.2.1
-      unfold captureFlagConsistentWithEP at h_cap_consistent
-      have h_must_cap := h_cap_consistent.mpr (Or.inr h_is_ep)
+      have h_cap_consistent' := h_legal.2.2.2.2.1
+      unfold captureFlagConsistentWithEP at h_cap_consistent'
+      have h_must_cap := h_cap_consistent'.mpr (Or.inr h_is_ep)
       rw [h_cap] at h_must_cap
       exact Bool.noConfusion h_must_cap
-    exact pawnAdvance_in_forwardMoves gs m h_pawn h_adv h_path h_cap h_not_ep h_not_castle
+    -- Extract captureFlagConsistentWithEP and destinationFriendlyFreeProp from fideLegal
+    have h_cap_consistent : captureFlagConsistentWithEP gs m := h_legal.2.2.2.2.1
+    have h_friendly_free : destinationFriendlyFreeProp gs m := h_legal.2.2.2.1
+    exact pawnAdvance_in_forwardMoves gs m h_pawn h_adv h_path h_cap h_not_ep h_not_castle h_cap_consistent h_friendly_free
 
 -- ============================================================================
 -- Phase 2: Board Invariant Preservation (TODO)
