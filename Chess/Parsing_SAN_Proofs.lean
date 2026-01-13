@@ -39,7 +39,7 @@ lemma allLegalMoves_turnMatches (gs : GameState) (m : Move) :
       · -- gs.board sq = none, no moves generated
         simp at h_in_sq
       · -- gs.board sq = some p
-        rename_i p _
+        rename_i p hboard
         split at h_in_sq
         · -- p.color ≠ gs.toMove, no moves generated
           simp at h_in_sq
@@ -51,7 +51,7 @@ lemma allLegalMoves_turnMatches (gs : GameState) (m : Move) :
           obtain ⟨⟨hpin, _⟩, _⟩ := h_in_sq
           -- All moves from pieceTargets have piece = p by construction
           -- pieceTargets generates moves with { piece := p, ... } in all cases
-          have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m hpin
+          have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m hboard hpin
           rw [hpiece]
           exact hcolor
     | inr h_in_rest =>
@@ -61,14 +61,17 @@ lemma allLegalMoves_turnMatches (gs : GameState) (m : Move) :
 
     Proof outline by case analysis on piece type:
     - King standard: filterMap constructs moves with { piece := p, ... }
-    - King castle: castleMoveIfLegal uses k from board with k.pieceType = King ∧ k.color = gs.toMove.
-      When p.color = gs.toMove (as in legalMovesForCached), p and k have same type and color, so p = k.
+    - King castle: castleMoveIfLegal uses k from board at cfg.kingFrom. With gs.board sq = some p
+      and sq = cfg.kingFrom (from pieceTargets_sets_fromSq), we get k = p.
     - Queen/Rook/Bishop: slidingTargets constructs moves with { piece := p, ... }
     - Knight: filterMap constructs moves with { piece := p, ... }
     - Pawn: all moves use { piece := p, ... }
 
-    Axiomatized because the castle case requires p.color = gs.toMove context from calling code. -/
+    The hypothesis gs.board sq = some p ensures castle case works (one king per side).
+
+    Axiomatized because castle case requires game-state validity reasoning. -/
 axiom pieceTargets_sets_piece (gs : GameState) (sq : Square) (p : Piece) (m : Move) :
+    gs.board sq = some p →
     m ∈ Rules.pieceTargets gs sq p → m.piece = p
 
 /-- Helper: pieceTargets always sets move.fromSq to the source square.
@@ -118,7 +121,7 @@ lemma allLegalMoves_originHasPiece (gs : GameState) (m : Move) :
           obtain ⟨⟨hpin, _⟩, _⟩ := h_in_sq
           -- pieceTargets sets fromSq = sq and piece = p
           have hfromSq : m.fromSq = sq := pieceTargets_sets_fromSq gs sq p m hboard hpin
-          have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m hpin
+          have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m hboard hpin
           rw [hfromSq, hpiece]
           exact hboard
     | inr h_in_rest =>

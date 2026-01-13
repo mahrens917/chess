@@ -1278,16 +1278,11 @@ axiom moveFromSAN_rejects_ambiguous (gs : GameState) (san : String) :
     ∃ err, moveFromSAN gs san = Except.error err ∧ err.startsWith "Ambiguous"
 
 /-- Castling SAN strings are normalized (0 → O).
-
-    **Proof strategy**: normalizeCastleToken maps '0' to 'O' via String.map.
-    normalizeCastleToken: s.map (fun c => if c = '0' then 'O' else c)
-    After this map, every '0' becomes 'O', so the result contains no '0'.
-
-    **Axiomatized**: Requires String.contains reasoning after String.map,
-    specifically that (s.map f).contains c = false when f maps c to something else. -/
-axiom parseSanToken_normalizes_castling (token : String) :
+    Uses Parsing_SAN_Proofs.parseSanToken_normalizes_castling. -/
+theorem parseSanToken_normalizes_castling (token : String) :
     (token.contains '0') →
-    ∃ st, parseSanToken token = Except.ok st ∧ ¬st.san.contains '0'
+    ∃ st, parseSanToken token = Except.ok st ∧ ¬st.san.contains '0' :=
+  Parsing_SAN_Proofs.parseSanToken_normalizes_castling token
 
 /-- Parsing a generated SAN produces an equivalent move (round-trip).
 
