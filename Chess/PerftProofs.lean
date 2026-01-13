@@ -20,12 +20,13 @@ def MoveEquiv (m1 m2 : Move) : Prop :=
   m1.castleRookTo = m2.castleRookTo ∧
   m1.isEnPassant = m2.isEnPassant
 
--- Temporary axiom: moveToSAN_unique_full until ParsingProofs compiles
-axiom moveToSAN_unique_full (gs : GameState) (m1 m2 : Move) :
+-- Uses proven theorem from ParsingProofs.lean
+theorem moveToSAN_unique_full (gs : GameState) (m1 m2 : Move) :
   m1 ∈ Rules.allLegalMoves gs →
   m2 ∈ Rules.allLegalMoves gs →
   moveToSAN gs m1 = moveToSAN gs m2 →
-  MoveEquiv m1 m2
+  MoveEquiv m1 m2 :=
+  ParsingProofs.moveToSAN_unique_full gs m1 m2
 end Parsing
 
 namespace Rules
@@ -116,16 +117,10 @@ def GameLine.toMoveList : {gs : GameState} → {n : Nat} → GameLine gs n → L
 -- ==============================================================================
 
 /-- Square.algebraic is injective: distinct squares have distinct algebraic notations.
-
-    Proof sketch: algebraic = fileChar.toString ++ toString(rankNat + 1)
-    - File char is 'a' + fileNat, uniquely determined by first character
-    - Rank is the remaining digit(s), uniquely determined by rest of string
-    - Both components are injective, so the combination is injective
-
-    This is structurally true but requires tedious string manipulation lemmas.
-    Axiomatized for pragmatic reasons. -/
-axiom Square.algebraic_injective {s₁ s₂ : Square} :
-    s₁.algebraic = s₂.algebraic → s₁ = s₂
+    Uses square_algebraic_injective from ParsingProofs.lean. -/
+theorem Square.algebraic_injective {s₁ s₂ : Square} :
+    s₁.algebraic = s₂.algebraic → s₁ = s₂ :=
+  ParsingProofs.square_algebraic_injective s₁ s₂
 
 -- NOTE: In a given position, the simplified SAN representation (target square algebraic
 -- notation) uniquely identifies a move among all legal moves.
