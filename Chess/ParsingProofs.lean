@@ -1473,55 +1473,189 @@ lemma pawn_single_double_exclusive (gs : GameState) (m1 m2 : Move)
     (h_file_eq : m1.fromSq.fileNat = m2.fromSq.fileNat)
     (h1_not_cap : ¬(m1.isCapture ∨ m1.isEnPassant))
     (h2_not_cap : ¬(m2.isCapture ∨ m2.isEnPassant))
-    (h1_single : Movement.rankDiff m1.fromSq m1.toSq = Movement.pawnDirection m1.piece.color)
-    (h2_double : Movement.rankDiff m2.fromSq m2.toSq = 2 * Movement.pawnDirection m2.piece.color)
+    (h1_single : Movement.rankDiff m1.fromSq m1.toSq = -Movement.pawnDirection m1.piece.color)
+    (h2_double : Movement.rankDiff m2.fromSq m2.toSq = -2 * Movement.pawnDirection m2.piece.color)
     (h_color_eq : m1.piece.color = m2.piece.color)
     (h2_path : pathClear gs.board m2.fromSq m2.toSq) :
     m1.fromSq = m2.fromSq := by
   -- From legality, m1 has a piece at its source
   have h1_fide := Completeness.allLegalMoves_sound gs m1 h1_legal
   have h1_origin : gs.board m1.fromSq = some m1.piece := h1_fide.2.1
-  -- Key arithmetic: m1.fromSq.rankInt is between m2.fromSq.rankInt and m2.toSq.rankInt
-  -- Single: m1.fromSq.rankInt = m1.toSq.rankInt + pawnDirection
-  -- Double: m2.fromSq.rankInt = m2.toSq.rankInt + 2 * pawnDirection
-  -- Since m1.toSq = m2.toSq and colors match:
-  -- m1.fromSq.rankInt = toSq.rankInt + p (where p = pawnDirection)
-  -- m2.fromSq.rankInt = toSq.rankInt + 2p
-  -- The intermediate of m2's path is at toSq.rankInt + p = m1.fromSq.rankInt
+  -- With the new sign convention:
+  -- Single: rankDiff = -pawnDirection means m1.fromSq.rank - m1.toSq.rank = -p
+  --   → m1.fromSq.rankInt = m1.toSq.rankInt - pawnDirection
+  -- Double: rankDiff = -2*pawnDirection means m2.fromSq.rank - m2.toSq.rank = -2p
+  --   → m2.fromSq.rankInt = m2.toSq.rankInt - 2*pawnDirection
+  -- Since m1.toSq = m2.toSq (h_dest_eq):
+  --   m1.fromSq.rankInt = toSq.rankInt - p
+  --   m2.fromSq.rankInt = toSq.rankInt - 2p
+  -- The intermediate of m2's double push is at:
+  --   m2.fromSq.rankInt + p = (toSq.rankInt - 2p) + p = toSq.rankInt - p = m1.fromSq.rankInt
   unfold Movement.rankDiff at h1_single h2_double
   unfold Movement.pawnDirection at h1_single h2_double
-  -- Show ranks are equal using arithmetic
+  -- Show ranks are equal using arithmetic and pathClear contradiction
   have h_rank_eq : m1.fromSq.rankNat = m2.fromSq.rankNat := by
-    -- From h1_single: m1.from.rank - m1.to.rank = direction
-    -- From h2_double: m2.from.rank - m2.to.rank = 2 * direction
-    -- If m1.from.rank ≠ m2.from.rank, then one is single, other is double
-    -- But pathClear for double requires the intermediate to be empty
-    -- And intermediate.rank = m2.from.rank + (direction toward target)
-    --                       = m2.to.rank + 2*direction + (-direction) = m2.to.rank + direction
-    --                       = m1.from.rank (from h1_single with same destination)
-    -- So intermediate = m1.from (same file too), but h1_origin says it has a piece
-    -- This contradicts pathClear
     by_contra h_rank_neq
-    -- If ranks differ, m1's source is the intermediate for m2's double push
-    -- pathClear m2 implies all squares between m2.fromSq and m2.toSq are empty
-    -- m1.fromSq is between them (by rank arithmetic)
-    -- But h1_origin says m1.fromSq has a piece
+    -- If ranks differ, m1's source is exactly the intermediate for m2's double push
     exfalso
-    -- Unfold pathClear to get emptiness of intermediate squares
+    -- The intermediate square of m2's path has:
+    --   file = m2.fromSq.file = m1.fromSq.file (h_file_eq)
+    --   rank = m2.fromSq.rank + pawnDirection = m1.fromSq.rank (by arithmetic)
+    -- This is exactly m1.fromSq
+    -- pathClear for m2 says this intermediate is empty
+    -- But h1_origin says m1.fromSq has a piece - contradiction!
     unfold pathClear at h2_path
-    -- m2's move is vertical (same file), so it uses the rook branch of squaresBetween
-    -- For a 2-step vertical move, squaresBetween returns the single intermediate
-    -- That intermediate has the same file and rank = m2.fromSq.rank + step toward target
-    -- = m2.fromSq.rank - pawnDirection (since we move toward target)
-    -- = (toSq.rank + 2p) + signInt(toSq.rank - fromSq.rank)
-    -- = (toSq.rank + 2p) + signInt(-2p)
-    -- = toSq.rank + 2p - signInt(2p) = toSq.rank + p (since signInt(2p) = signInt(p) = p/|p|)
-    -- And m1.fromSq.rank = toSq.rank + p (from h1_single)
-    -- So the intermediate has same rank as m1.fromSq
-    -- With same file (h_file_eq), intermediate = m1.fromSq
-    -- But pathClear says intermediate is empty, contradicting h1_origin
-    -- This requires proving membership in squaresBetween, which needs more infrastructure
-    sorry
+    -- Compute the intermediate rank equality
+    have h_intermediate_rank : m1.fromSq.rankInt = m2.fromSq.rankInt + Movement.pawnDirection m1.piece.color := by
+      -- From h1_single: m1.fromSq.rankInt - m1.toSq.rankInt = -pawnDirection
+      -- From h2_double: m2.fromSq.rankInt - m2.toSq.rankInt = -2*pawnDirection
+      -- And m1.toSq = m2.toSq, colors equal
+      simp only [Square.rankInt] at h1_single h2_double ⊢
+      unfold Movement.pawnDirection
+      rw [h_color_eq] at h1_single
+      have h_to_eq : m1.toSq.rankNat = m2.toSq.rankNat := by
+        rw [h_dest_eq]
+      simp only [Square.rankInt] at h_to_eq
+      cases m2.piece.color with
+      | White => simp only at h1_single h2_double ⊢; omega
+      | Black => simp only at h1_single h2_double ⊢; omega
+    -- m1.fromSq is in squaresBetween m2.fromSq m2.toSq
+    -- pathClear says all such squares are empty, but m1.fromSq has a piece
+    -- We have:
+    --   - Same file: h_file_eq
+    --   - Same rank: h_intermediate_rank shows m1.from.rank = m2.from.rank + direction
+    -- This means m1.fromSq is the intermediate of m2's double push
+    -- Directly show emptiness contradiction using pathClear's ∀ sq ∈ squaresBetween, board sq = none
+    have h_m1_empty : gs.board m1.fromSq = none := by
+      apply h2_path
+      -- m1.fromSq ∈ Movement.squaresBetween m2.fromSq m2.toSq
+      -- For a vertical 2-step move, squaresBetween returns [intermediate]
+      -- The intermediate has same file as m2.fromSq and rank = m2.fromSq.rank + pawnDirection
+      -- This equals m1.fromSq (by h_file_eq and h_intermediate_rank)
+      unfold Movement.squaresBetween
+      -- Not diagonal: |fileDiff| = 0 ≠ |rankDiff| = 2
+      have h2_not_diag : ¬Movement.isDiagonal m2.fromSq m2.toSq := by
+        unfold Movement.isDiagonal Movement.absInt Movement.fileDiff Movement.rankDiff
+        simp only [not_and]
+        intro _
+        -- fileDiff = 0 (same file from pawn advance, h_file_eq via dest equality)
+        -- rankDiff = ±2 (double push)
+        -- So |0| ≠ |±2|
+        rw [h_dest_eq] at h_file_eq
+        simp only [Square.fileInt]
+        have h2_fd_zero : m2.fromSq.fileNat = m2.toSq.fileNat := h_file_eq
+        cases m2.piece.color with
+        | White =>
+          simp only at h2_double
+          simp only [Square.rankInt] at h2_double ⊢
+          omega
+        | Black =>
+          simp only at h2_double
+          simp only [Square.rankInt] at h2_double ⊢
+          omega
+      simp only [h2_not_diag, ↓reduceIte]
+      -- Is a rook move: same file, different ranks
+      have h2_rook : Movement.isRookMove m2.fromSq m2.toSq := by
+        unfold Movement.isRookMove Movement.fileDiff Movement.rankDiff
+        constructor
+        · -- m2.fromSq ≠ m2.toSq (different ranks)
+          intro h_eq
+          rw [h_eq] at h2_double
+          unfold Movement.rankDiff at h2_double
+          cases m2.piece.color <;> simp at h2_double
+        · left
+          constructor
+          · -- fileDiff = 0
+            rw [h_dest_eq] at h_file_eq
+            simp only [Square.fileInt]
+            omega
+          · -- rankDiff ≠ 0
+            cases m2.piece.color with
+            | White => simp only [Square.rankInt] at h2_double ⊢; omega
+            | Black => simp only [Square.rankInt] at h2_double ⊢; omega
+      simp only [h2_rook, ↓reduceIte]
+      -- steps = |fileDiff| + |rankDiff| = 0 + 2 = 2
+      have h_steps : Int.natAbs (Movement.fileDiff m2.fromSq m2.toSq) +
+                     Int.natAbs (Movement.rankDiff m2.fromSq m2.toSq) = 2 := by
+        unfold Movement.fileDiff Movement.rankDiff
+        rw [h_dest_eq] at h_file_eq
+        simp only [Square.fileInt, Square.rankInt]
+        cases m2.piece.color with
+        | White => simp only at h2_double; omega
+        | Black => simp only at h2_double; omega
+      simp only [h_steps, show (2 : Nat) ≤ 1 = false by omega, ↓reduceIte]
+      -- List.range 1 = [0], filterMap produces [intermediate]
+      simp only [Nat.sub_self_add, List.range_one, List.filterMap_cons, List.filterMap_nil]
+      -- The intermediate square
+      have h_stepFile : Movement.signInt (-(Movement.fileDiff m2.fromSq m2.toSq)) = 0 := by
+        unfold Movement.signInt Movement.fileDiff
+        rw [h_dest_eq] at h_file_eq
+        simp only [Square.fileInt]
+        have : (↑m2.fromSq.fileNat : Int) - ↑m2.toSq.fileNat = 0 := by omega
+        simp [this]
+      have h_stepRank : Movement.signInt (-(Movement.rankDiff m2.fromSq m2.toSq)) =
+                        Movement.pawnDirection m2.piece.color := by
+        unfold Movement.signInt Movement.rankDiff Movement.pawnDirection
+        cases m2.piece.color with
+        | White =>
+          simp only [↓reduceIte, Square.rankInt] at h2_double ⊢
+          have : (↑m2.fromSq.rankNat : Int) - ↑m2.toSq.rankNat < 0 := by omega
+          simp [this]
+          omega
+        | Black =>
+          simp only [↓reduceIte, Square.rankInt] at h2_double ⊢
+          have : (↑m2.fromSq.rankNat : Int) - ↑m2.toSq.rankNat > 0 := by omega
+          simp [this]
+          omega
+      simp only [Int.ofNat_zero, Int.ofNat_one, h_stepFile, h_stepRank, mul_one, mul_zero, add_zero]
+      -- squareFromInts produces m1.fromSq
+      have h_sq_eq : Movement.squareFromInts m2.fromSq.fileInt
+                       (m2.fromSq.rankInt + Movement.pawnDirection m2.piece.color) = some m1.fromSq := by
+        unfold Movement.squareFromInts
+        -- File is valid
+        have h_f_valid : 0 ≤ m2.fromSq.fileInt ∧ m2.fromSq.fileInt < 8 := by
+          simp only [Square.fileInt]
+          constructor
+          · exact Int.ofNat_nonneg _
+          · have : m2.fromSq.fileNat < 8 := m2.fromSq.file.isLt; omega
+        -- Rank is valid (intermediate rank)
+        have h_r_valid : 0 ≤ m2.fromSq.rankInt + Movement.pawnDirection m2.piece.color ∧
+                         m2.fromSq.rankInt + Movement.pawnDirection m2.piece.color < 8 := by
+          unfold Movement.pawnDirection
+          cases m2.piece.color with
+          | White =>
+            simp only [↓reduceIte, Square.rankInt] at h2_double ⊢
+            -- White double push starts from rank 1, intermediate at rank 2
+            have h_from_rank : m2.fromSq.rankNat = 1 := by omega
+            simp [h_from_rank]; omega
+          | Black =>
+            simp only [↓reduceIte, Square.rankInt] at h2_double ⊢
+            -- Black double push starts from rank 6, intermediate at rank 5
+            have h_from_rank : m2.fromSq.rankNat = 6 := by omega
+            simp [h_from_rank]; omega
+        simp only [h_f_valid.1, h_f_valid.2, h_r_valid.1, h_r_valid.2, and_self, ↓reduceIte]
+        -- The constructed square equals m1.fromSq
+        congr 1
+        ext
+        · -- file
+          simp only [Square.mkUnsafe, Square.fileNat]
+          rw [h_color_eq] at h_intermediate_rank
+          have : m2.fromSq.fileNat = m1.fromSq.fileNat := h_file_eq.symm
+          simp only [Square.fileInt] at this ⊢
+          omega
+        · -- rank
+          simp only [Square.mkUnsafe, Square.rankNat]
+          rw [h_color_eq] at h_intermediate_rank
+          simp only [Square.rankInt] at h_intermediate_rank ⊢
+          have : (m2.fromSq.rankInt + Movement.pawnDirection m2.piece.color).toNat = m1.fromSq.rankNat := by
+            unfold Movement.pawnDirection
+            cases m2.piece.color with
+            | White => simp only [↓reduceIte] at h_intermediate_rank ⊢; omega
+            | Black => simp only [↓reduceIte] at h_intermediate_rank ⊢; omega
+          omega
+      simp only [h_sq_eq, List.mem_singleton]
+    rw [h_m1_empty] at h1_origin
+    exact Option.noConfusion h1_origin
   -- With same file and same rank, squares are equal
   ext
   · exact Fin.ext h_file_eq
@@ -1864,19 +1998,179 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
         have h_is_peer : m1.fromSq ≠ m2.fromSq ∧
             m1.piece.pieceType = m2.piece.pieceType ∧
             m1.toSq = m2.toSq := ⟨h_from_neq, h_type_eq, h_dest_eq⟩
-        -- The disambiguation algorithm (sanDisambiguation) ensures:
-        -- 1. m2 is in m1's peer list (same type, same dest, different source)
-        -- 2. m1 is in m2's peer list
-        -- 3. Both have non-empty disambiguation
-        -- 4. Disambiguation includes file or rank (or both) to distinguish from peers
-        -- 5. If m1.fromSq ≠ m2.fromSq, either:
-        --    - Different files → m1's dis has m1.fileChar, m2's dis has m2.fileChar
-        --    - Same file, different ranks → m1's dis has m1.rankChar, m2's dis has m2.rankChar
-        -- 6. Therefore dis1 ≠ dis2, contradicting h_san_eq
-        --
-        -- This requires analyzing sanDisambiguation's case logic and showing that
-        -- for peers with different sources, the disambiguations differ.
-        sorry -- Disambiguation produces different strings for different sources
+        -- The disambiguation algorithm (sanDisambiguation) ensures that moves with
+        -- different source squares produce different disambiguation strings.
+        -- Use the disambiguation_determines_source helper lemma.
+        have h_dis_neq := disambiguation_determines_source gs m1 m2
+          h1_legal h2_legal h_type_eq h_dest_eq hp1 h_from_neq
+        -- The SAN format is: pieceLetter ++ disambiguation ++ capture ++ algebraic ++ promo
+        -- With same piece type, destination, and promotion (from legal moves with same type),
+        -- the SAN can only differ in the disambiguation or capture flag.
+        -- But since h_san_eq says the full SAN is equal, the disambiguations must be equal.
+        -- This contradicts h_dis_neq.
+        -- Extract disambiguation equality from h_san_eq
+        simp only [moveToSanBase, hc1, hc2, h1_castle, h2_castle, ite_false, hp1, hp2] at h_san_eq
+        -- Now h_san_eq shows the full piece SAN is equal
+        -- pieceLetter ++ dis1 ++ cap1 ++ alg ++ promo1 = pieceLetter ++ dis2 ++ cap2 ++ alg ++ promo2
+        -- Extract that dis1 = dis2 from the string equality
+        -- This requires careful string analysis
+        -- For now, use exfalso with h_dis_neq
+        exfalso
+        apply h_dis_neq
+        -- Need to extract disambiguation equality from full SAN equality
+        -- pieceLetter is 1 char (N, B, R, Q, K)
+        -- After pieceLetter comes disambiguation
+        -- The key observation is that the structure forces dis1 = dis2
+        -- because same destination means same algebraic suffix, same piece type means
+        -- same capture behavior
+        -- Since h_san_eq forces the entire strings to be equal and all other components
+        -- (pieceLetter, algebraic, promo) are determined by piece type, destination, and
+        -- promotion type which are equal, the disambiguations must be equal
+        -- Extract this using string manipulation
+        -- For a rigorous proof, we need to show that the middle portion (dis ++ cap) is equal
+        -- Since cap is either "" or "x" based on isCapture, and legal moves with same
+        -- destination have consistent capture flags, we can extract dis equality
+        have h_cap1 := if m1.isCapture ∨ m1.isEnPassant then "x" else ""
+        have h_cap2 := if m2.isCapture ∨ m2.isEnPassant then "x" else ""
+        -- For now, assert the equality holds from the structure
+        have h_dis_eq : sanDisambiguation gs m1 = sanDisambiguation gs m2 := by
+          -- From the SAN string equality, extract the disambiguation portion
+          -- This is complex due to variable-length components
+          -- The pattern is: 1-char piece + dis + (""/"x") + 2-char algebraic + promo
+          -- Since piece letters are equal and algebraic portions are equal (same dest),
+          -- and promotions are equal (for moves with same dest, promo is determined),
+          -- the dis++cap portions must be equal
+          -- Further, since cap is determined by the target square occupancy for non-pawns,
+          -- and both have same target, cap1 = cap2
+          -- Therefore dis1 = dis2
+          -- The rigorous proof would use string length and extraction lemmas
+          -- For now, extract from the structure
+          simp only [moveToSanBase, hc1, hc2, h1_castle, h2_castle, ite_false, hp1, hp2] at h_san_eq
+          -- Use the fact that pieceLetter ++ rest1 = pieceLetter ++ rest2 implies rest1 = rest2
+          have h_after_piece : sanDisambiguation gs m1 ++
+              (if m1.isCapture ∨ m1.isEnPassant then "x" else "") ++ m1.toSq.algebraic ++ promotionSuffix m1 =
+              sanDisambiguation gs m2 ++
+              (if m2.isCapture ∨ m2.isEnPassant then "x" else "") ++ m2.toSq.algebraic ++ promotionSuffix m2 := by
+            -- pieceLetter is same for both (same piece type)
+            have h_pl_eq : pieceLetter m1.piece.pieceType = pieceLetter m2.piece.pieceType := by
+              rw [h_type_eq]
+            -- Strip the pieceLetter prefix
+            have : pieceLetter m1.piece.pieceType ++
+                (sanDisambiguation gs m1 ++ (if m1.isCapture ∨ m1.isEnPassant then "x" else "") ++
+                m1.toSq.algebraic ++ promotionSuffix m1) =
+                pieceLetter m2.piece.pieceType ++
+                (sanDisambiguation gs m2 ++ (if m2.isCapture ∨ m2.isEnPassant then "x" else "") ++
+                m2.toSq.algebraic ++ promotionSuffix m2) := by
+              simp only [← String.append_assoc]
+              exact h_san_eq
+            rw [h_pl_eq] at this
+            exact String.append_left_cancel this
+          -- Now extract disambiguation by stripping algebraic and promo suffix
+          -- algebraic is equal (same dest), promo is equal for same move type
+          have h_alg_eq : m1.toSq.algebraic = m2.toSq.algebraic := by
+            rw [h_dest_eq]
+          -- For legal moves with same destination, capture is determined by occupancy
+          -- Both are non-pawn, so capture = target occupied by opponent
+          -- Since same destination and both legal, capture flags match
+          -- (A square can't be both occupied and empty)
+          have h_cap_eq : (if m1.isCapture ∨ m1.isEnPassant then "x" else "") =
+                          (if m2.isCapture ∨ m2.isEnPassant then "x" else "") := by
+            -- For non-pawn legal moves to same square, capture status is same
+            -- because capture means the target square is occupied
+            -- This is a property of legal move generation
+            -- Non-pawns can't do en passant
+            have h1_no_ep : ¬m1.isEnPassant := by
+              intro hep
+              -- En passant is only for pawns
+              have h_pawn := Move.isEnPassant_implies_pawn m1 hep
+              exact hp1 h_pawn
+            have h2_no_ep : ¬m2.isEnPassant := by
+              intro hep
+              have h_pawn := Move.isEnPassant_implies_pawn m2 hep
+              exact hp2 h_pawn
+            simp only [h1_no_ep, h2_no_ep, Bool.false_eq_true, or_false]
+            -- Now just compare isCapture
+            -- Both legal moves to same square: capture iff square occupied
+            -- Use allLegalMoves_sound to get fideLegal
+            -- fideLegal includes captureFlagConsistent
+            have h1_fide := Completeness.allLegalMoves_sound gs m1 h1_legal
+            have h2_fide := Completeness.allLegalMoves_sound gs m2 h2_legal
+            have h1_cap_consist := h1_fide.2.2.2.2.1
+            have h2_cap_consist := h2_fide.2.2.2.2.1
+            unfold captureFlagConsistentWithEP at h1_cap_consist h2_cap_consist
+            -- captureFlagConsistentWithEP says:
+            -- isCapture ↔ (target has opponent piece) ∨ isEnPassant
+            -- Since no en passant: isCapture ↔ target has opponent piece
+            have h1_cap_iff : m1.isCapture ↔ gs.board m1.toSq ≠ none ∧
+                ∃ p, gs.board m1.toSq = some p ∧ p.color ≠ m1.piece.color := by
+              constructor
+              · intro hcap
+                have := h1_cap_consist.mp hcap
+                cases this with
+                | inl h => exact h
+                | inr h => exact absurd h h1_no_ep
+              · intro ⟨_, p, hp, hc⟩
+                exact h1_cap_consist.mpr (Or.inl ⟨⟨hp ▸ Option.isSome_some, p, hp, hc⟩⟩)
+            -- Same analysis for m2 with same destination
+            -- Since destinations are equal, the occupancy check gives same result
+            -- Therefore isCapture flags match
+            by_cases hc1 : m1.isCapture
+            · -- m1 is capture: target has piece
+              simp only [hc1, ↓reduceIte]
+              have h_occ := h1_cap_consist.mp hc1
+              cases h_occ with
+              | inl h_has_opp =>
+                -- m1.toSq has opponent piece
+                -- m2.toSq = m1.toSq, so m2.toSq also has opponent piece
+                -- Therefore m2 is also capture
+                have h2_has_opp : gs.board m2.toSq ≠ none := by
+                  rw [← h_dest_eq]; exact h_has_opp.1
+                have hc2 : m2.isCapture := by
+                  apply h2_cap_consist.mpr
+                  left
+                  rw [← h_dest_eq]
+                  exact h_has_opp
+                simp only [hc2, ↓reduceIte]
+              | inr h_ep => exact absurd h_ep h1_no_ep
+            · -- m1 is not capture: target empty or has friendly piece
+              simp only [hc1, Bool.false_eq_true, ↓reduceIte]
+              -- m2.toSq = m1.toSq, so same condition applies
+              have hc2 : ¬m2.isCapture := by
+                intro hc2_true
+                apply hc1
+                have h2_occ := h2_cap_consist.mp hc2_true
+                cases h2_occ with
+                | inl h_has_opp =>
+                  apply h1_cap_consist.mpr
+                  left
+                  rw [h_dest_eq]
+                  exact h_has_opp
+                | inr h_ep => exact absurd h_ep h2_no_ep
+              simp only [hc2, Bool.false_eq_true, ↓reduceIte]
+          -- Non-pawn pieces don't have promotions
+          have h_promo1 : promotionSuffix m1 = "" := by
+            unfold promotionSuffix
+            -- Non-pawn legal moves have no promotion
+            have h1_fide := Completeness.allLegalMoves_sound gs m1 h1_legal
+            have h1_promo := h1_fide.2.2.2.1
+            unfold promotionConsistent at h1_promo
+            simp only [hp1, ↓reduceIte] at h1_promo
+            simp [h1_promo]
+          have h_promo2 : promotionSuffix m2 = "" := by
+            unfold promotionSuffix
+            have h2_fide := Completeness.allLegalMoves_sound gs m2 h2_legal
+            have h2_promo := h2_fide.2.2.2.1
+            unfold promotionConsistent at h2_promo
+            simp only [hp2, ↓reduceIte] at h2_promo
+            simp [h2_promo]
+          -- Now with cap_eq, alg_eq, promo1="", promo2="", extract dis equality
+          rw [h_alg_eq, h_cap_eq, h_promo1, h_promo2] at h_after_piece
+          -- h_after_piece: dis1 ++ cap ++ alg ++ "" = dis2 ++ cap ++ alg ++ ""
+          simp only [String.append_empty] at h_after_piece
+          -- h_after_piece: dis1 ++ cap ++ alg = dis2 ++ cap ++ alg
+          -- Use right cancellation: cap ++ alg is the same on both sides
+          exact String.append_right_cancel (String.append_right_cancel h_after_piece)
+        exact h_dis_eq
 
 axiom string_algebraic_extraction : ∀ (pt : PieceType) (dis1 dis2 : String) (cap1 cap2 : String)
     (alg1 alg2 : String) (promo1 promo2 : String),
@@ -1919,6 +2213,342 @@ lemma rankChar_injective : ∀ r1 r2 : Nat, r1 < 8 → r2 < 8 →
     simp [Char.ofNat, Char.mk] at this
     omega
   omega
+
+-- Helper lemma: file chars ('a'-'h') and rank chars ('1'-'8') are disjoint
+lemma fileChar_neq_rankChar : ∀ f r : Nat, f < 8 → r < 8 →
+    Char.ofNat ('a'.toNat + f) ≠ Char.ofNat ('1'.toNat + r) := by
+  intro f r hf hr h
+  -- 'a'.toNat = 97, '1'.toNat = 49
+  -- file chars: 97-104, rank chars: 49-56
+  -- These ranges don't overlap
+  have hfile : 'a'.toNat + f ≥ 97 ∧ 'a'.toNat + f ≤ 104 := by
+    simp only [Char.toNat]
+    omega
+  have hrank : '1'.toNat + r ≥ 49 ∧ '1'.toNat + r ≤ 56 := by
+    simp only [Char.toNat]
+    omega
+  have : (Char.ofNat ('a'.toNat + f)).val = (Char.ofNat ('1'.toNat + r)).val := by
+    rw [h]
+  simp [Char.ofNat, Char.mk] at this
+  omega
+
+-- Helper lemma: if two disambiguation strings produce equal concatenations, they must be equal
+-- when file chars and rank chars are distinct and positions are known
+lemma disambiguation_determines_source
+    (gs : GameState) (m1 m2 : Move)
+    (h1_legal : m1 ∈ Rules.allLegalMoves gs)
+    (h2_legal : m2 ∈ Rules.allLegalMoves gs)
+    (h_type_eq : m1.piece.pieceType = m2.piece.pieceType)
+    (h_dest_eq : m1.toSq = m2.toSq)
+    (h_not_pawn : m1.piece.pieceType ≠ PieceType.Pawn)
+    (h_from_neq : m1.fromSq ≠ m2.fromSq) :
+    sanDisambiguation gs m1 ≠ sanDisambiguation gs m2 := by
+  -- m1 and m2 are peers of each other
+  -- Both have non-empty peers lists (containing at least each other)
+  -- The disambiguation algorithm ensures:
+  -- 1. If files differ: disambiguation includes file char which differs
+  -- 2. If files same but ranks differ: both have file conflict, so disambiguation includes rank
+  unfold sanDisambiguation
+  simp only [h_not_pawn, ↓reduceIte]
+  have hp2 : m2.piece.pieceType ≠ PieceType.Pawn := by rw [← h_type_eq]; exact h_not_pawn
+  simp only [hp2, ↓reduceIte]
+  -- Both have peers (at least each other)
+  have h1_has_peer : ¬(List.filter (fun cand =>
+      decide (cand.piece.pieceType = m1.piece.pieceType ∧
+              cand.piece.color = m1.piece.color ∧
+              cand.toSq = m1.toSq ∧
+              cand.fromSq ≠ m1.fromSq))
+      (Rules.allLegalMoves gs)).isEmpty := by
+    simp only [List.isEmpty_eq_false_iff]
+    use m2
+    simp only [List.mem_filter, decide_eq_true_eq]
+    constructor
+    · exact h2_legal
+    · constructor
+      · rw [h_type_eq]
+      · constructor
+        · -- colors equal (both are gs.toMove)
+          have hc1 := (Completeness.allLegalMoves_sound gs m1 h1_legal).1
+          have hc2 := (Completeness.allLegalMoves_sound gs m2 h2_legal).1
+          rw [hc1, hc2]
+        · constructor
+          · exact h_dest_eq.symm
+          · exact h_from_neq.symm
+  have h2_has_peer : ¬(List.filter (fun cand =>
+      decide (cand.piece.pieceType = m2.piece.pieceType ∧
+              cand.piece.color = m2.piece.color ∧
+              cand.toSq = m2.toSq ∧
+              cand.fromSq ≠ m2.fromSq))
+      (Rules.allLegalMoves gs)).isEmpty := by
+    simp only [List.isEmpty_eq_false_iff]
+    use m1
+    simp only [List.mem_filter, decide_eq_true_eq]
+    constructor
+    · exact h1_legal
+    · constructor
+      · rw [← h_type_eq]
+      · constructor
+        · have hc1 := (Completeness.allLegalMoves_sound gs m1 h1_legal).1
+          have hc2 := (Completeness.allLegalMoves_sound gs m2 h2_legal).1
+          rw [hc1, hc2]
+        · constructor
+          · exact h_dest_eq
+          · exact h_from_neq
+  simp only [h1_has_peer, h2_has_peer, ↓reduceIte]
+  -- Now we need to show the disambiguations differ
+  -- Case split on whether files are equal
+  by_cases hfile_eq : m1.fromSq.file = m2.fromSq.file
+  · -- Same file: ranks must differ (since fromSq differs)
+    have hrank_neq : m1.fromSq.rank ≠ m2.fromSq.rank := by
+      intro h_rank_eq
+      apply h_from_neq
+      ext <;> [exact Fin.ext (congrArg _ hfile_eq); exact Fin.ext (congrArg _ h_rank_eq)]
+    -- m2 is in m1's peer list with same file → m1 has file conflict
+    have h1_file_conflict : (List.filter (fun cand =>
+        decide (cand.piece.pieceType = m1.piece.pieceType ∧
+                cand.piece.color = m1.piece.color ∧
+                cand.toSq = m1.toSq ∧
+                cand.fromSq ≠ m1.fromSq))
+        (Rules.allLegalMoves gs)).any (fun p => p.fromSq.file = m1.fromSq.file) = true := by
+      simp only [List.any_eq_true]
+      use m2
+      simp only [List.mem_filter, decide_eq_true_eq, and_true]
+      constructor
+      · constructor
+        · exact h2_legal
+        · constructor
+          · rw [h_type_eq]
+          · constructor
+            · have hc1 := (Completeness.allLegalMoves_sound gs m1 h1_legal).1
+              have hc2 := (Completeness.allLegalMoves_sound gs m2 h2_legal).1
+              rw [hc1, hc2]
+            · exact ⟨h_dest_eq.symm, h_from_neq.symm⟩
+      · exact hfile_eq.symm
+    -- Similarly for m2
+    have h2_file_conflict : (List.filter (fun cand =>
+        decide (cand.piece.pieceType = m2.piece.pieceType ∧
+                cand.piece.color = m2.piece.color ∧
+                cand.toSq = m2.toSq ∧
+                cand.fromSq ≠ m2.fromSq))
+        (Rules.allLegalMoves gs)).any (fun p => p.fromSq.file = m2.fromSq.file) = true := by
+      simp only [List.any_eq_true]
+      use m1
+      simp only [List.mem_filter, decide_eq_true_eq, and_true]
+      constructor
+      · constructor
+        · exact h1_legal
+        · constructor
+          · rw [← h_type_eq]
+          · constructor
+            · have hc1 := (Completeness.allLegalMoves_sound gs m1 h1_legal).1
+              have hc2 := (Completeness.allLegalMoves_sound gs m2 h2_legal).1
+              rw [hc1, hc2]
+            · exact ⟨h_dest_eq, h_from_neq⟩
+      · exact hfile_eq
+    simp only [h1_file_conflict, Bool.not_true, h2_file_conflict, ↓reduceIte]
+    -- Both have file conflict, so disambiguation depends on rank conflict
+    by_cases h1_rank_conflict : (List.filter _ _).any (fun p => p.fromSq.rank = m1.fromSq.rank)
+    · by_cases h2_rank_conflict : (List.filter _ _).any (fun p => p.fromSq.rank = m2.fromSq.rank)
+      · -- Both have rank conflict: use full square
+        simp only [h1_rank_conflict, Bool.not_true, h2_rank_conflict, ↓reduceIte]
+        -- dis1 = fileChar1 ++ rankChar1, dis2 = fileChar2 ++ rankChar2
+        -- Same file but different ranks, so rankChars differ
+        intro h_eq
+        -- String equality implies rankChar equality
+        have h_rank_char_eq : m1.fromSq.rankChar = m2.fromSq.rankChar := by
+          have : (String.singleton m1.fromSq.fileChar ++ String.singleton m1.fromSq.rankChar) =
+                 (String.singleton m2.fromSq.fileChar ++ String.singleton m2.fromSq.rankChar) := h_eq
+          -- Since fileChars are equal (same file), rankChars must be equal
+          simp only [String.singleton_eq_singleton_iff] at this ⊢
+          have hf : m1.fromSq.fileChar = m2.fromSq.fileChar := by
+            unfold Square.fileChar
+            simp [hfile_eq]
+          simp [hf, String.append_inj_left] at this
+          exact this
+        -- But ranks differ, contradiction via rankChar_injective
+        have : m1.fromSq.rankNat = m2.fromSq.rankNat := by
+          unfold Square.rankChar at h_rank_char_eq
+          exact rankChar_injective m1.fromSq.rankNat m2.fromSq.rankNat
+            m1.fromSq.rank.isLt m2.fromSq.rank.isLt h_rank_char_eq
+        exact hrank_neq (Fin.ext this)
+      · -- m1 has rank conflict, m2 doesn't: dis1 uses both, dis2 uses rank only
+        simp only [h1_rank_conflict, Bool.not_true, h2_rank_conflict, Bool.not_false, ↓reduceIte]
+        intro h_eq
+        -- dis1 = fileChar1 ++ rankChar1, dis2 = rankChar2
+        -- Length mismatch or content mismatch
+        have len1 : (String.singleton m1.fromSq.fileChar ++ String.singleton m1.fromSq.rankChar).length = 2 := by
+          simp [String.length]
+        have len2 : (String.singleton m2.fromSq.rankChar).length = 1 := by
+          simp [String.length]
+        rw [h_eq] at len1
+        omega
+    · by_cases h2_rank_conflict : (List.filter _ _).any (fun p => p.fromSq.rank = m2.fromSq.rank)
+      · -- m1 no rank conflict, m2 has: dis1 uses rank only, dis2 uses both
+        simp only [h1_rank_conflict, Bool.not_false, h2_rank_conflict, Bool.not_true, ↓reduceIte]
+        intro h_eq
+        have len1 : (String.singleton m1.fromSq.rankChar).length = 1 := by simp [String.length]
+        have len2 : (String.singleton m2.fromSq.fileChar ++ String.singleton m2.fromSq.rankChar).length = 2 := by
+          simp [String.length]
+        rw [h_eq] at len1
+        omega
+      · -- Neither has rank conflict: both use rank only
+        simp only [h1_rank_conflict, Bool.not_false, h2_rank_conflict, ↓reduceIte]
+        intro h_eq
+        -- dis1 = rankChar1, dis2 = rankChar2, but ranks differ
+        have : m1.fromSq.rankNat = m2.fromSq.rankNat := by
+          simp only [String.singleton_eq_singleton_iff] at h_eq
+          unfold Square.rankChar at h_eq
+          exact rankChar_injective m1.fromSq.rankNat m2.fromSq.rankNat
+            m1.fromSq.rank.isLt m2.fromSq.rank.isLt h_eq
+        exact hrank_neq (Fin.ext this)
+  · -- Different files
+    -- Case split on m1's file conflict
+    by_cases h1_file_conflict : (List.filter (fun cand =>
+        decide (cand.piece.pieceType = m1.piece.pieceType ∧
+                cand.piece.color = m1.piece.color ∧
+                cand.toSq = m1.toSq ∧
+                cand.fromSq ≠ m1.fromSq))
+        (Rules.allLegalMoves gs)).any (fun p => p.fromSq.file = m1.fromSq.file)
+    · by_cases h2_file_conflict : (List.filter (fun cand =>
+          decide (cand.piece.pieceType = m2.piece.pieceType ∧
+                  cand.piece.color = m2.piece.color ∧
+                  cand.toSq = m2.toSq ∧
+                  cand.fromSq ≠ m2.fromSq))
+          (Rules.allLegalMoves gs)).any (fun p => p.fromSq.file = m2.fromSq.file)
+      · -- Both have file conflict
+        simp only [h1_file_conflict, Bool.not_true, h2_file_conflict, ↓reduceIte]
+        -- Need to analyze rank conflict cases
+        by_cases h1_rank : (List.filter _ _).any (fun p => p.fromSq.rank = m1.fromSq.rank)
+        · by_cases h2_rank : (List.filter _ _).any (fun p => p.fromSq.rank = m2.fromSq.rank)
+          · -- Both have rank conflict: use full square
+            simp only [h1_rank, Bool.not_true, h2_rank, ↓reduceIte]
+            intro h_eq
+            -- fileChar1 ++ rankChar1 = fileChar2 ++ rankChar2
+            -- Since files differ, fileChars differ
+            have hfc : m1.fromSq.fileChar ≠ m2.fromSq.fileChar := by
+              unfold Square.fileChar
+              intro heq
+              apply hfile_eq
+              exact Fin.ext (fileChar_injective m1.fromSq.fileNat m2.fromSq.fileNat
+                m1.fromSq.file.isLt m2.fromSq.file.isLt heq)
+            -- First chars of equal strings must be equal, contradiction
+            have : (String.singleton m1.fromSq.fileChar ++ String.singleton m1.fromSq.rankChar).get 0 =
+                   (String.singleton m2.fromSq.fileChar ++ String.singleton m2.fromSq.rankChar).get 0 := by
+              rw [h_eq]
+            simp [String.get, String.singleton] at this
+            exact hfc this
+          · -- m1 rank conflict, m2 no rank conflict
+            simp only [h1_rank, Bool.not_true, h2_rank, Bool.not_false, ↓reduceIte]
+            intro h_eq
+            have len1 : (String.singleton m1.fromSq.fileChar ++ String.singleton m1.fromSq.rankChar).length = 2 := by
+              simp [String.length]
+            have len2 : (String.singleton m2.fromSq.rankChar).length = 1 := by simp [String.length]
+            rw [h_eq] at len1; omega
+        · by_cases h2_rank : (List.filter _ _).any (fun p => p.fromSq.rank = m2.fromSq.rank)
+          · -- m1 no rank conflict, m2 rank conflict
+            simp only [h1_rank, Bool.not_false, h2_rank, Bool.not_true, ↓reduceIte]
+            intro h_eq
+            have len1 : (String.singleton m1.fromSq.rankChar).length = 1 := by simp [String.length]
+            have len2 : (String.singleton m2.fromSq.fileChar ++ String.singleton m2.fromSq.rankChar).length = 2 := by
+              simp [String.length]
+            rw [h_eq] at len1; omega
+          · -- Neither has rank conflict: both use rank
+            simp only [h1_rank, Bool.not_false, h2_rank, ↓reduceIte]
+            -- dis1 = rankChar1, dis2 = rankChar2
+            -- If ranks are same, files must differ (since fromSq differs)
+            -- If ranks differ, rankChars differ
+            intro h_eq
+            simp only [String.singleton_eq_singleton_iff] at h_eq
+            unfold Square.rankChar at h_eq
+            have h_rank_eq := rankChar_injective m1.fromSq.rankNat m2.fromSq.rankNat
+              m1.fromSq.rank.isLt m2.fromSq.rank.isLt h_eq
+            -- So ranks are equal, but files differ
+            -- m1 has file conflict from some other peer (not m2 since files differ)
+            -- m2 has file conflict from some other peer (not m1 since files differ)
+            -- But neither has rank conflict, meaning no peer has same rank
+            -- m1 and m2 have same rank (h_rank_eq), but m1 is not in its own peer list
+            -- This should work out
+            -- Actually wait: if m1 has rank conflict, there's a peer with same rank
+            -- Neither has rank conflict means no peer has same rank as m1 or m2
+            -- But m2 is m1's peer, and they have same rank (h_rank_eq)
+            -- So m1 SHOULD have rank conflict (from m2)
+            -- Contradiction!
+            exfalso
+            have h_m1_rank_conflict_from_m2 : (List.filter (fun cand =>
+                decide (cand.piece.pieceType = m1.piece.pieceType ∧
+                        cand.piece.color = m1.piece.color ∧
+                        cand.toSq = m1.toSq ∧
+                        cand.fromSq ≠ m1.fromSq))
+                (Rules.allLegalMoves gs)).any (fun p => p.fromSq.rank = m1.fromSq.rank) = true := by
+              simp only [List.any_eq_true]
+              use m2
+              simp only [List.mem_filter, decide_eq_true_eq, and_true]
+              constructor
+              · constructor
+                · exact h2_legal
+                · constructor
+                  · rw [h_type_eq]
+                  · constructor
+                    · have hc1 := (Completeness.allLegalMoves_sound gs m1 h1_legal).1
+                      have hc2 := (Completeness.allLegalMoves_sound gs m2 h2_legal).1
+                      rw [hc1, hc2]
+                    · exact ⟨h_dest_eq.symm, h_from_neq.symm⟩
+              · exact Fin.ext h_rank_eq
+            rw [h_m1_rank_conflict_from_m2] at h1_rank
+            exact Bool.false_ne_true h1_rank
+      · -- m1 has file conflict, m2 doesn't: dis1 uses rank (or both), dis2 uses file
+        simp only [h1_file_conflict, Bool.not_true, h2_file_conflict, Bool.not_false, ↓reduceIte]
+        by_cases h1_rank : (List.filter _ _).any (fun p => p.fromSq.rank = m1.fromSq.rank)
+        · -- m1 uses both
+          simp only [h1_rank, Bool.not_true, ↓reduceIte]
+          intro h_eq
+          -- fileChar1 ++ rankChar1 = fileChar2
+          have len1 : (String.singleton m1.fromSq.fileChar ++ String.singleton m1.fromSq.rankChar).length = 2 := by
+            simp [String.length]
+          have len2 : (String.singleton m2.fromSq.fileChar).length = 1 := by simp [String.length]
+          rw [h_eq] at len1; omega
+        · -- m1 uses rank only
+          simp only [h1_rank, Bool.not_false, ↓reduceIte]
+          intro h_eq
+          -- rankChar1 = fileChar2: impossible since disjoint character sets
+          simp only [String.singleton_eq_singleton_iff] at h_eq
+          unfold Square.rankChar Square.fileChar at h_eq
+          exact fileChar_neq_rankChar m2.fromSq.fileNat m1.fromSq.rankNat
+            m2.fromSq.file.isLt m1.fromSq.rank.isLt h_eq.symm
+    · -- m1 doesn't have file conflict: dis1 uses file
+      simp only [h1_file_conflict, Bool.not_false, ↓reduceIte]
+      by_cases h2_file_conflict : (List.filter (fun cand =>
+          decide (cand.piece.pieceType = m2.piece.pieceType ∧
+                  cand.piece.color = m2.piece.color ∧
+                  cand.toSq = m2.toSq ∧
+                  cand.fromSq ≠ m2.fromSq))
+          (Rules.allLegalMoves gs)).any (fun p => p.fromSq.file = m2.fromSq.file)
+      · -- m1 uses file, m2 has file conflict (uses rank or both)
+        simp only [h2_file_conflict, Bool.not_true, ↓reduceIte]
+        by_cases h2_rank : (List.filter _ _).any (fun p => p.fromSq.rank = m2.fromSq.rank)
+        · -- m2 uses both
+          simp only [h2_rank, Bool.not_true, ↓reduceIte]
+          intro h_eq
+          have len1 : (String.singleton m1.fromSq.fileChar).length = 1 := by simp [String.length]
+          have len2 : (String.singleton m2.fromSq.fileChar ++ String.singleton m2.fromSq.rankChar).length = 2 := by
+            simp [String.length]
+          rw [h_eq] at len1; omega
+        · -- m2 uses rank
+          simp only [h2_rank, Bool.not_false, ↓reduceIte]
+          intro h_eq
+          -- fileChar1 = rankChar2: impossible since disjoint character sets
+          simp only [String.singleton_eq_singleton_iff] at h_eq
+          unfold Square.rankChar Square.fileChar at h_eq
+          exact fileChar_neq_rankChar m1.fromSq.fileNat m2.fromSq.rankNat
+            m1.fromSq.file.isLt m2.fromSq.rank.isLt h_eq
+      · -- Both use file: files differ, so fileChars differ
+        simp only [h2_file_conflict, Bool.not_false, ↓reduceIte]
+        intro h_eq
+        simp only [String.singleton_eq_singleton_iff] at h_eq
+        apply hfile_eq
+        unfold Square.fileChar at h_eq
+        exact Fin.ext (fileChar_injective m1.fromSq.fileNat m2.fromSq.fileNat
+          m1.fromSq.file.isLt m2.fromSq.file.isLt h_eq)
 
 lemma square_algebraic_injective : ∀ sq1 sq2 : Square,
     sq1.algebraic = sq2.algebraic → sq1 = sq2 := by
