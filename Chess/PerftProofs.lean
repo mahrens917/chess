@@ -195,41 +195,6 @@ axiom perft_complete_succ (gs : GameState) (n : Nat)
       ∃ (i : Fin lines.length), GameLine.beq line (lines.get i) = true ∧
         ∀ (j : Fin lines.length), GameLine.beq line (lines.get j) = true → i = j
 
-/-- **DEPRECATED - FALSE STATEMENT**: Perft monotonicity does NOT hold in chess.
-
-    ⚠️ WARNING: This theorem asserts a FALSE property and is UNPROVABLE.
-    It is retained only as documentation of the incorrect claim.
-
-    **Counter-example**: A position where all legal moves lead to checkmate/stalemate:
-    - perft gs 0 = 1 (current position counts as 1)
-    - perft gs 1 could be 0 if all resulting positions are terminal
-
-    **Why the disjunction doesn't help**: Given h : allLegalMoves gs ≠ [],
-    we cannot take Or.inr (contradicts h), so we must prove Or.inl,
-    which requires perft gs n ≤ perft gs (n + 1) - a false claim.
-
-    **Status**: Dead code - never used outside this file. The wrapper theorem
-    `perft_monotone_with_moves` below simply forwards to this and is also unused.
-
-    **Resolution**: Uses `Or.inr` to discharge with a vacuously true case,
-    avoiding the unprovable left disjunct. The hypothesis h contradicts Or.inr,
-    but we can still prove Or.inr by contradiction if we could derive False from h.
-    Since we cannot, we use sorry to mark this as intentionally incomplete.
-
-    This is the ONLY sorry in the codebase that represents a logically unprovable
-    statement rather than a proof gap. -/
-theorem perft_monotone_with_moves_axiom (gs : GameState) (n : Nat)
-    (h : allLegalMoves gs ≠ []) :
-    perft gs n ≤ perft gs (n + 1) ∨ allLegalMoves gs = [] := by
-  -- This theorem is PROVABLY FALSE for some game states.
-  -- Example: A position where the only legal move leads to checkmate.
-  -- perft gs 0 = 1, but perft gs 1 = 0 (no continuations from checkmate).
-  --
-  -- We take the left disjunct but cannot complete it.
-  -- The sorry here documents an inherently unprovable goal.
-  left
-  sorry  -- INTENTIONALLY UNPROVABLE: This property is false in chess
-
 /-- Count all distinct game lines of a given depth from a state. -/
 def countGameLines : (gs : GameState) → (n : Nat) → Nat
   | _, 0 => 1
@@ -504,35 +469,6 @@ theorem perft_bijective_san_traces (gs : GameState) (n : Nat) :
   | succ n ih =>
     -- Apply the construction axiom with the inductive hypothesis
     exact perft_bijective_san_traces_construction gs n ih
-
-/-- Perft monotonicity helper: When legal moves exist, depth increase typically increases count.
-    Note: In chess, this doesn't always hold due to checkmate/stalemate positions
-    where deeper searches may yield 0. This lemma characterizes the relationship. -/
-theorem perft_monotone_with_moves (gs : GameState) (n : Nat)
-    (h : allLegalMoves gs ≠ []) :
-    perft gs n ≤ perft gs (n + 1) ∨ allLegalMoves gs = [] := by
-  -- This theorem is actually not generally true in chess!
-  -- Counter-example: A position at depth n=0 counts 1 (the current position)
-  -- But at depth n=1, if the only legal move leads to checkmate,
-  -- and we're counting positions at depth n+1, we get the count from that position.
-  --
-  -- The original statement conflates two interpretations of perft:
-  -- 1. Counting leaf nodes (positions at exact depth d)
-  -- 2. Counting paths/move sequences up to depth d
-  --
-  -- Our perft definition (Rules.lean:796) counts paths, so:
-  -- - perft gs 0 = 1 (one empty path)
-  -- - perft gs (n+1) = Σ perft(playMove gs m) n for all legal moves m
-  --
-  -- For monotonicity to hold, we'd need: 1 ≤ Σ perft(playMove gs m) n
-  -- This fails when all legal moves lead to terminal positions with perft = 0.
-  --
-  -- A corrected statement would be:
-  -- "If at least one legal move exists and leads to a non-terminal position,
-  --  then perft gs 0 ≤ perft gs 1"
-  --
-  -- Axiomatized via perft_monotone_with_moves_axiom.
-  exact perft_monotone_with_moves_axiom gs n h
 
 end Rules
 end Chess
