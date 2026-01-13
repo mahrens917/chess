@@ -197,6 +197,110 @@ theorem rook_offset_range_membership (N k : Nat)
   have : k - 1 < N - 1 := range_membership_of_offset N k h_pos h_lt
   exact List.mem_range.mpr this
 
+/--
+For a pawn two-step advance, the intermediate square exists.
+Intermediate is at (src.file, src.rank + pawnDirection).
+-/
+theorem pawnTwoStep_intermediate_exists
+    (h_adv : isPawnAdvance c src target)
+    (h_two : rankDiff src target = -2 * pawnDirection c) :
+    ∃ sq, squareFromInts src.fileInt (src.rankInt + pawnDirection c) = some sq := by
+  -- The intermediate rank is between src and target, so it's valid
+  unfold squareFromInts
+  -- src.fileInt is valid (0-7)
+  have h_file_valid : 0 ≤ src.fileInt ∧ src.fileInt < 8 := by
+    constructor
+    · exact Int.ofNat_nonneg src.fileNat
+    · have : src.fileNat < 8 := src.file.isLt
+      simp [Square.fileInt]; omega
+  -- Intermediate rank is valid
+  have h_rank_valid : 0 ≤ src.rankInt + pawnDirection c ∧ src.rankInt + pawnDirection c < 8 := by
+    unfold pawnDirection
+    cases c with
+    | White =>
+      simp only [↓reduceIte]
+      -- For white, src.rank must be 1 (starting rank for double push)
+      -- intermediate at rank 2
+      have h_src_rank : src.rankInt = 1 := by
+        unfold rankDiff at h_two
+        simp only [pawnDirection, ↓reduceIte] at h_two
+        simp [Square.rankInt] at h_two ⊢
+        omega
+      simp [Square.rankInt, h_src_rank]
+      omega
+    | Black =>
+      simp only [↓reduceIte]
+      -- For black, src.rank must be 6 (starting rank for double push)
+      -- intermediate at rank 5
+      have h_src_rank : src.rankInt = 6 := by
+        unfold rankDiff at h_two
+        simp only [pawnDirection, ↓reduceIte] at h_two
+        simp [Square.rankInt] at h_two ⊢
+        omega
+      simp [Square.rankInt, h_src_rank]
+      omega
+  simp only [h_file_valid.1, h_file_valid.2, h_rank_valid.1, h_rank_valid.2, and_self, ↓reduceIte]
+  use Square.mkUnsafe ⟨src.fileInt.toNat, by omega⟩ ⟨(src.rankInt + pawnDirection c).toNat, by omega⟩
+
+/--
+The intermediate square of a pawn two-step advance is in squaresBetween.
+-/
+theorem pawnTwoStep_intermediate_in_squaresBetween
+    (h_adv : isPawnAdvance c src target)
+    (h_two : rankDiff src target = -2 * pawnDirection c)
+    (sq : Square)
+    (h_sq : squareFromInts src.fileInt (src.rankInt + pawnDirection c) = some sq) :
+    sq ∈ squaresBetween src target := by
+  -- Two-step pawn advance is a vertical rook move
+  unfold squaresBetween
+  -- Not diagonal (same file)
+  have h_not_diag : ¬isDiagonal src target := by
+    unfold isDiagonal isPawnAdvance at *
+    intro h_diag
+    have h_file_same := h_adv.2.1
+    unfold fileDiff at h_file_same
+    have : absInt (fileDiff src target) = 0 := by simp [fileDiff, h_file_same]
+    have : absInt (rankDiff src target) = 0 := by
+      rw [← this]; exact h_diag
+    unfold rankDiff at h_two this
+    cases c <;> simp [pawnDirection] at h_two this
+  simp only [h_not_diag, ↓reduceIte]
+  -- Is a rook move (vertical)
+  have h_rook : isRookMove src target := by
+    unfold isRookMove isPawnAdvance at *
+    constructor
+    · exact h_adv.1
+    · left
+      constructor
+      · exact h_adv.2.1
+      · unfold rankDiff at h_two
+        cases c <;> simp [pawnDirection] at h_two ⊢ <;> omega
+  simp only [h_rook, ↓reduceIte]
+  -- Show sq is in the filterMap result
+  -- For a 2-step vertical move, squaresBetween returns [intermediate]
+  -- steps = |rankDiff| = 2
+  have h_file_diff : fileDiff src target = 0 := h_adv.2.1
+  have h_steps : Int.natAbs (fileDiff src target) + Int.natAbs (rankDiff src target) = 2 := by
+    simp [h_file_diff]
+    unfold rankDiff at h_two
+    cases c <;> simp [pawnDirection] at h_two ⊢ <;> omega
+  simp only [h_file_diff, h_steps, show (2 : Nat) ≤ 1 = false by omega, ↓reduceIte]
+  -- List.range 1 = [0]
+  simp only [List.range_one]
+  -- filterMap on [0] with step = 1
+  simp only [List.filterMap_cons, List.filterMap_nil]
+  -- The square at step 1 from src toward target
+  have h_step_dir : signInt (-(fileDiff src target)) = 0 ∧
+                    signInt (-(rankDiff src target)) = pawnDirection c := by
+    constructor
+    · simp [h_file_diff, signInt]
+    · unfold rankDiff at h_two
+      unfold signInt pawnDirection
+      cases c <;> simp at h_two ⊢ <;> omega
+  simp only [h_step_dir.1, h_step_dir.2, Int.ofNat_zero, Int.ofNat_one, mul_one, mul_zero, add_zero]
+  -- squareFromInts gives sq
+  simp only [h_sq, List.mem_singleton]
+
 end Movement
 
 end Chess
