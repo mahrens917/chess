@@ -84,10 +84,109 @@ axiom kingVsKing_no_checkmate (gs : GameState)
 def boardHasOnlyKings (b : Board) : Prop :=
   ∀ sq p, b sq = some p → p.pieceType = PieceType.King
 
+/-- Helper for foldl: count non-kings starting from accumulator -/
+private def countNonKingsFrom (b : Board) (squares : List Square) (acc : Nat) : Nat :=
+  squares.foldl (fun a sq =>
+    match b sq with
+    | some p => if p.pieceType ≠ PieceType.King then a + 1 else a
+    | none => a) acc
+
+/-- Helper: foldl is monotonically increasing -/
+private lemma countNonKingsFrom_ge_acc (b : Board) (squares : List Square) (acc : Nat) :
+    countNonKingsFrom b squares acc ≥ acc := by
+  unfold countNonKingsFrom
+  induction squares generalizing acc with
+  | nil => simp
+  | cons sq rest ih =>
+    simp only [List.foldl_cons]
+    have h_step : (match b sq with
+      | some p => if p.pieceType ≠ PieceType.King then acc + 1 else acc
+      | none => acc) ≥ acc := by
+      split <;> try split <;> omega
+    calc countNonKingsFrom b rest _ ≥ _ := ih _
+         _ ≥ acc := h_step
+
+/-- Helper: if foldl result is acc, then no non-kings were found -/
+private lemma countNonKingsFrom_eq_acc_iff (b : Board) (squares : List Square) (acc : Nat) :
+    countNonKingsFrom b squares acc = acc ↔
+    ∀ sq ∈ squares, ∀ p, b sq = some p → p.pieceType = PieceType.King := by
+  unfold countNonKingsFrom
+  induction squares generalizing acc with
+  | nil => simp
+  | cons sq rest ih =>
+    simp only [List.foldl_cons, List.mem_cons]
+    constructor
+    · -- result = acc → all kings
+      intro h sq' hsq' p hp
+      cases hsq' with
+      | inl heq =>
+        subst heq
+        -- If sq had a non-king, acc would increase
+        by_contra h_not_king
+        have h_increased : (match b sq with
+          | some p => if p.pieceType ≠ PieceType.King then acc + 1 else acc
+          | none => acc) = acc + 1 := by
+          simp only [hp, h_not_king, ↓reduceIte]
+        rw [h_increased] at h
+        -- foldl from acc+1 is ≥ acc+1, but result is acc
+        have := countNonKingsFrom_ge_acc b rest (acc + 1)
+        omega
+      | inr h_in_rest =>
+        -- For sq' in rest, use IH
+        have h_first_step : (match b sq with
+          | some p => if p.pieceType ≠ PieceType.King then acc + 1 else acc
+          | none => acc) ≤ acc := by
+          have h_ge := countNonKingsFrom_ge_acc b rest _
+          omega
+        have h_first_eq : (match b sq with
+          | some p => if p.pieceType ≠ PieceType.King then acc + 1 else acc
+          | none => acc) = acc := by
+          have h_ge : _ ≥ acc := by split <;> try split <;> omega
+          omega
+        rw [h_first_eq] at h
+        rw [ih] at h
+        exact h sq' h_in_rest p hp
+    · -- all kings → result = acc
+      intro h
+      have h_sq : ∀ p, b sq = some p → p.pieceType = PieceType.King :=
+        fun p hp => h sq (Or.inl rfl) p hp
+      have h_first : (match b sq with
+        | some p => if p.pieceType ≠ PieceType.King then acc + 1 else acc
+        | none => acc) = acc := by
+        split
+        · rename_i p hp
+          simp only [h_sq p hp, not_true_eq_false, ↓reduceIte]
+        · rfl
+      rw [h_first, ih]
+      intro sq' hsq' p hp
+      exact h sq' (Or.inr hsq') p hp
+
 /-- Helper: countNonKingPieces = 0 iff all pieces are kings -/
-axiom countNonKingPieces_zero_iff_onlyKings (gs : GameState) :
-    countNonKingPieces gs = 0 ↔ boardHasOnlyKings gs.board
--- Proof requires induction on allSquares and reasoning about foldl accumulator
+lemma countNonKingPieces_zero_iff_onlyKings (gs : GameState) :
+    countNonKingPieces gs = 0 ↔ boardHasOnlyKings gs.board := by
+  unfold countNonKingPieces boardHasOnlyKings
+  have h := countNonKingsFrom_eq_acc_iff gs.board allSquares 0
+  unfold countNonKingsFrom at h
+  rw [h]
+  constructor
+  · intro hall sq p hp
+    have hsq_mem : sq ∈ allSquares := by
+      unfold allSquares
+      simp only [List.mem_join, List.mem_map]
+      use (List.range 8).map (Square.mkUnsafe sq.fileNat)
+      constructor
+      · use sq.fileNat
+        constructor
+        · exact List.mem_range.mpr sq.fileNat_lt_8
+        · rfl
+      · simp only [List.mem_map]
+        use sq.rankNat
+        constructor
+        · exact List.mem_range.mpr sq.rankNat_lt_8
+        · simp [Square.mkUnsafe, sq.fileNat_eq, sq.rankNat_eq]
+    exact hall sq hsq_mem p hp
+  · intro hall sq _ p hp
+    exact hall sq p hp
 
 /-- Helper: Updating a board preserves the only-kings property if we add a king or none -/
 lemma board_update_preserves_onlyKings (b : Board) (sq : Square) (mp : Option Piece)
