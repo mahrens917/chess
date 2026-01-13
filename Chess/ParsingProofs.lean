@@ -1285,19 +1285,11 @@ theorem parseSanToken_normalizes_castling (token : String) :
   Parsing_SAN_Proofs.parseSanToken_normalizes_castling token
 
 /-- Parsing a generated SAN produces an equivalent move (round-trip).
-
-    **Proof strategy**: moveToSAN generates unambiguous SAN via disambiguation.
-    1. moveToSAN produces: moveToSanBase gs m ++ check/mate suffix
-    2. moveToSanBase includes file/rank disambiguation to ensure uniqueness
-    3. moveFromSAN parses and filters allLegalMoves by moveToSanBase matching
-    4. Since m is legal and moveToSanBase is unique, m is the only match
-    5. validateCheckHint confirms the suffix, returning m (or equivalent)
-
-    **Axiomatized**: Requires disambiguation correctness (moveToSanBase is injective
-    on legal moves), filter uniqueness, and check/mate suffix validation. -/
-axiom moveFromSAN_moveToSAN_roundtrip (gs : GameState) (m : Move) :
+    Uses Parsing_SAN_Proofs.moveFromSAN_moveToSAN_roundtrip. -/
+theorem moveFromSAN_moveToSAN_roundtrip (gs : GameState) (m : Move) :
     Rules.isLegalMove gs m = true →
-    ∃ m', moveFromSAN gs (moveToSAN gs m) = Except.ok m' ∧ MoveEquiv m m'
+    ∃ m', moveFromSAN gs (moveToSAN gs m) = Except.ok m' ∧ MoveEquiv m m' :=
+  Parsing_SAN_Proofs.moveFromSAN_moveToSAN_roundtrip gs m
 
 -- ============================================================================
 -- SAN UNIQUENESS: Sub-case Proofs
