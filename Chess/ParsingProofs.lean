@@ -2319,15 +2319,70 @@ lemma moveToSanBase_no_check_suffix (gs : GameState) (m : Move) :
       -- Same logic: ends with algebraic or promotionSuffix, not with + or #
       norm_num
 
--- Axiom: If two non-check-suffix strings concatenated with suffixes are equal,
--- and the suffixes are check/mate indicators, then the bases are equal
-axiom san_base_from_full_concat (base1 base2 suf1 suf2 : String) :
+/-- If two non-check-suffix strings concatenated with suffixes are equal,
+    and the suffixes are check/mate indicators, then the bases are equal.
+    Proof: Case analysis on suffixes shows either suf1=suf2 (so base1=base2),
+    or one base would end with +/# contradicting hypotheses. -/
+theorem san_base_from_full_concat (base1 base2 suf1 suf2 : String) :
     base1 ++ suf1 = base2 ++ suf2 →
     ¬base1.endsWith "+" ∧ ¬base1.endsWith "#" →
     ¬base2.endsWith "+" ∧ ¬base2.endsWith "#" →
     suf1 ∈ ["", "+", "#"] →
     suf2 ∈ ["", "+", "#"] →
-    base1 = base2
+    base1 = base2 := by
+  intro h_eq h1_no_suffix h2_no_suffix h1_suf h2_suf
+  -- Case analysis on what suf1 and suf2 are
+  simp only [List.mem_cons, List.mem_singleton] at h1_suf h2_suf
+  -- Extract the hypotheses about not ending with + or #
+  obtain ⟨h1_no_plus, h1_no_hash⟩ := h1_no_suffix
+  obtain ⟨h2_no_plus, h2_no_hash⟩ := h2_no_suffix
+
+  -- Consider each case of suf1
+  rcases h1_suf with rfl | rfl | rfl
+  · -- suf1 = ""
+    rcases h2_suf with rfl | rfl | rfl
+    · -- suf2 = "", so base1 = base2
+      simp at h_eq; exact h_eq
+    · -- suf2 = "+", so base1 = base2 ++ "+"
+      simp at h_eq
+      -- base1 = base2 ++ "+" means base1 ends with "+"
+      have h_ends : base1.endsWith "+" := by rw [h_eq]; simp [String.endsWith]
+      exact absurd h_ends h1_no_plus
+    · -- suf2 = "#", so base1 = base2 ++ "#"
+      simp at h_eq
+      have h_ends : base1.endsWith "#" := by rw [h_eq]; simp [String.endsWith]
+      exact absurd h_ends h1_no_hash
+  · -- suf1 = "+"
+    rcases h2_suf with rfl | rfl | rfl
+    · -- suf2 = "", so base1 ++ "+" = base2
+      simp at h_eq
+      have h_ends : base2.endsWith "+" := by rw [← h_eq]; simp [String.endsWith]
+      exact absurd h_ends h2_no_plus
+    · -- suf2 = "+", so base1 ++ "+" = base2 ++ "+"
+      simp at h_eq; exact h_eq
+    · -- suf2 = "#", so base1 ++ "+" = base2 ++ "#"
+      -- Last char of LHS is '+', last char of RHS is '#'
+      -- These differ, so h_eq is False
+      have h_last_lhs : (base1 ++ "+").back = '+' := by simp [String.back]
+      have h_last_rhs : (base2 ++ "#").back = '#' := by simp [String.back]
+      rw [h_eq] at h_last_lhs
+      simp only [h_last_rhs] at h_last_lhs
+      cases h_last_lhs
+  · -- suf1 = "#"
+    rcases h2_suf with rfl | rfl | rfl
+    · -- suf2 = "", so base1 ++ "#" = base2
+      simp at h_eq
+      have h_ends : base2.endsWith "#" := by rw [← h_eq]; simp [String.endsWith]
+      exact absurd h_ends h2_no_hash
+    · -- suf2 = "+", so base1 ++ "#" = base2 ++ "+"
+      -- Last char of LHS is '#', last char of RHS is '+'
+      have h_last_lhs : (base1 ++ "#").back = '#' := by simp [String.back]
+      have h_last_rhs : (base2 ++ "+").back = '+' := by simp [String.back]
+      rw [h_eq] at h_last_lhs
+      simp only [h_last_rhs] at h_last_lhs
+      cases h_last_lhs
+    · -- suf2 = "#", so base1 ++ "#" = base2 ++ "#"
+      simp at h_eq; exact h_eq
 
 theorem moveToSAN_unique_full (gs : GameState) (m1 m2 : Move) :
     m1 ∈ Rules.allLegalMoves gs →
