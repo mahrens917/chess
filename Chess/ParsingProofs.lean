@@ -1460,6 +1460,73 @@ theorem pawn_capture_adjacent_rank (gs : GameState) (m : Move) :
     | White => simp only at h_cap_geom; left; omega
     | Black => simp only at h_cap_geom; right; omega
 
+/-- Helper: A pawn single push and double push to the same destination cannot both exist.
+    The single push source is exactly the intermediate square that the double push requires
+    to be empty via pathClear. Since the single push has a pawn at its source (h_origin),
+    the double push's pathClear condition fails. -/
+lemma pawn_single_double_exclusive (gs : GameState) (m1 m2 : Move)
+    (h1_legal : m1 ∈ Rules.allLegalMoves gs)
+    (h2_legal : m2 ∈ Rules.allLegalMoves gs)
+    (h1_pawn : m1.piece.pieceType = PieceType.Pawn)
+    (h2_pawn : m2.piece.pieceType = PieceType.Pawn)
+    (h_dest_eq : m1.toSq = m2.toSq)
+    (h_file_eq : m1.fromSq.fileNat = m2.fromSq.fileNat)
+    (h1_not_cap : ¬(m1.isCapture ∨ m1.isEnPassant))
+    (h2_not_cap : ¬(m2.isCapture ∨ m2.isEnPassant))
+    (h1_single : Movement.rankDiff m1.fromSq m1.toSq = Movement.pawnDirection m1.piece.color)
+    (h2_double : Movement.rankDiff m2.fromSq m2.toSq = 2 * Movement.pawnDirection m2.piece.color)
+    (h_color_eq : m1.piece.color = m2.piece.color)
+    (h2_path : pathClear gs.board m2.fromSq m2.toSq) :
+    m1.fromSq = m2.fromSq := by
+  -- From legality, m1 has a piece at its source
+  have h1_fide := Completeness.allLegalMoves_sound gs m1 h1_legal
+  have h1_origin : gs.board m1.fromSq = some m1.piece := h1_fide.2.1
+  -- Key arithmetic: m1.fromSq.rankInt is between m2.fromSq.rankInt and m2.toSq.rankInt
+  -- Single: m1.fromSq.rankInt = m1.toSq.rankInt + pawnDirection
+  -- Double: m2.fromSq.rankInt = m2.toSq.rankInt + 2 * pawnDirection
+  -- Since m1.toSq = m2.toSq and colors match:
+  -- m1.fromSq.rankInt = toSq.rankInt + p (where p = pawnDirection)
+  -- m2.fromSq.rankInt = toSq.rankInt + 2p
+  -- The intermediate of m2's path is at toSq.rankInt + p = m1.fromSq.rankInt
+  unfold Movement.rankDiff at h1_single h2_double
+  unfold Movement.pawnDirection at h1_single h2_double
+  -- Show ranks are equal using arithmetic
+  have h_rank_eq : m1.fromSq.rankNat = m2.fromSq.rankNat := by
+    -- From h1_single: m1.from.rank - m1.to.rank = direction
+    -- From h2_double: m2.from.rank - m2.to.rank = 2 * direction
+    -- If m1.from.rank ≠ m2.from.rank, then one is single, other is double
+    -- But pathClear for double requires the intermediate to be empty
+    -- And intermediate.rank = m2.from.rank + (direction toward target)
+    --                       = m2.to.rank + 2*direction + (-direction) = m2.to.rank + direction
+    --                       = m1.from.rank (from h1_single with same destination)
+    -- So intermediate = m1.from (same file too), but h1_origin says it has a piece
+    -- This contradicts pathClear
+    by_contra h_rank_neq
+    -- If ranks differ, m1's source is the intermediate for m2's double push
+    -- pathClear m2 implies all squares between m2.fromSq and m2.toSq are empty
+    -- m1.fromSq is between them (by rank arithmetic)
+    -- But h1_origin says m1.fromSq has a piece
+    exfalso
+    -- Unfold pathClear to get emptiness of intermediate squares
+    unfold pathClear at h2_path
+    -- m2's move is vertical (same file), so it uses the rook branch of squaresBetween
+    -- For a 2-step vertical move, squaresBetween returns the single intermediate
+    -- That intermediate has the same file and rank = m2.fromSq.rank + step toward target
+    -- = m2.fromSq.rank - pawnDirection (since we move toward target)
+    -- = (toSq.rank + 2p) + signInt(toSq.rank - fromSq.rank)
+    -- = (toSq.rank + 2p) + signInt(-2p)
+    -- = toSq.rank + 2p - signInt(2p) = toSq.rank + p (since signInt(2p) = signInt(p) = p/|p|)
+    -- And m1.fromSq.rank = toSq.rank + p (from h1_single)
+    -- So the intermediate has same rank as m1.fromSq
+    -- With same file (h_file_eq), intermediate = m1.fromSq
+    -- But pathClear says intermediate is empty, contradicting h1_origin
+    -- This requires proving membership in squaresBetween, which needs more infrastructure
+    sorry
+  -- With same file and same rank, squares are equal
+  ext
+  · exact Fin.ext h_file_eq
+  · exact Fin.ext h_rank_eq
+
 /-- Two legal moves with same piece type, destination, and SAN base have same source square.
     Proof: By the design of sanDisambiguation - it adds enough info (file and/or rank) to
     distinguish legal moves with same piece type and destination. If source squares differ,
@@ -1749,6 +1816,10 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
             -- One is single push, one is double push
             -- WLOG m1 is single push, m2 is double push
             -- (The symmetric case follows by symmetry)
+            -- Both pawns have same color (both are gs.toMove)
+            have h_color_eq : m1.piece.color = m2.piece.color := by
+              have hc1 := h1_fide.1; have hc2 := h2_fide.1
+              rw [hc1, hc2]
             cases h1_rank_cases with
             | inl h1_single =>
               cases h2_rank_cases with
@@ -1758,61 +1829,24 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
                 have : m1.fromSq.rankNat = m2.fromSq.rankNat := by omega
                 exact h_rank_neq this
               | inr h2_double =>
-                -- m1 single, m2 double: contradiction via pathClear
-                -- m1's source is the intermediate for m2's path
-                -- m2's pathClear requires m1's source to be empty
-                -- But m1's source has a pawn (h1_origin)
-                --
-                -- From isPawnAdvance:
-                -- - h1_single: m1.fromSq.rankInt - m1.toSq.rankInt = pawnDirection
-                -- - h2_double: m2.fromSq.rankInt - m2.toSq.rankInt = 2 * pawnDirection
-                -- Same destination means m1.toSq.rankInt = m2.toSq.rankInt
-                --
-                -- So m1.fromSq.rankInt = toSq.rankInt + pawnDirection
-                --    m2.fromSq.rankInt = toSq.rankInt + 2 * pawnDirection
-                --
-                -- The intermediate of m2's path is at toSq.rankInt + pawnDirection = m1.fromSq.rankInt
-                -- So m1.fromSq should be in squaresBetween m2.fromSq m2.toSq
-                -- pathClear m2 requires this to be empty
-                -- But h1_origin says it has a pawn
-                --
-                -- The sign convention in isPawnAdvance (positive) vs actual move (negative)
-                -- requires careful handling. For now we use omega to derive the arithmetic contradiction.
-                unfold Movement.rankDiff at h1_single h2_double
-                -- With same destination and same file:
-                -- m1.fromSq has rank such that (rank - dest.rank = p) for single push
-                -- m2.fromSq has rank such that (rank - dest.rank = 2p) for double push
-                -- Where p = pawnDirection (±1)
-                -- Since h_rank_neq and we have different amounts, one is at dest+p, other at dest+2p
-                -- But for double push, pathClear needs dest+p to be empty
-                -- And single push has pawn at dest+p
-                --
-                -- The key fact: m1.fromSq is in squaresBetween m2.fromSq m2.toSq
-                -- because m1.fromSq is the intermediate square of m2's 2-step move.
-                -- pathClear h2_path then says isEmpty gs.board m1.fromSq = true
-                -- But h1_origin says gs.board m1.fromSq = some piece, contradiction.
-                --
-                -- Formalization would require proving:
-                -- 1. m2's move is a rook move (vertical, same file, 2 ranks)
-                -- 2. m1.fromSq = squareFromInts(m2.fromSq.fileInt, m2.fromSq.rankInt + step)
-                --    where step = signInt(toSq.rankInt - fromSq.rankInt)
-                -- 3. Use rookRay_intermediate_in_squaresBetween or similar
-                -- 4. Extract isEmpty from pathClear via List.all
-                --
-                -- This requires substantial infrastructure about squaresBetween for vertical moves.
-                -- The arithmetic is correct but formalization is blocked on this infrastructure.
-                sorry -- Pawn single vs double push: requires squaresBetween infrastructure
+                -- m1 single, m2 double: use helper lemma
+                have h_eq := pawn_single_double_exclusive gs m1 m2
+                  h1_legal h2_legal hp1 hp2 h_dest_eq h_file_eq
+                  (by push_neg; exact hcap1)
+                  (by push_neg; exact hcap2)
+                  h1_single h2_double h_color_eq h2_path
+                exact h_from_neq h_eq
             | inr h1_double =>
               cases h2_rank_cases with
               | inl h2_single =>
-                -- Symmetric: m1 double, m2 single
-                -- Same logic as above case with m1/m2 swapped
-                -- m2.fromSq is in squaresBetween m1.fromSq m1.toSq
-                -- h1_path (pathClear) says isEmpty gs.board m2.fromSq = true
-                -- But h2_origin says gs.board m2.fromSq = some piece
-                unfold Movement.rankDiff at h1_double h2_single
-                -- Same infrastructure requirements as the previous case
-                sorry -- Symmetric: requires squaresBetween infrastructure
+                -- m1 double, m2 single: symmetric case
+                have h_eq := pawn_single_double_exclusive gs m2 m1
+                  h2_legal h1_legal hp2 hp1 h_dest_eq.symm
+                  (by omega : m2.fromSq.fileNat = m1.fromSq.fileNat)
+                  (by push_neg; exact hcap2)
+                  (by push_neg; exact hcap1)
+                  h2_single h1_double h_color_eq.symm h1_path
+                exact h_from_neq h_eq.symm
               | inr h2_double =>
                 -- Both double push: same rank diff → same source rank
                 unfold Movement.rankDiff at h1_double h2_double
