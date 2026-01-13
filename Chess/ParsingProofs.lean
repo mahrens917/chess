@@ -1577,15 +1577,54 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
           · simp only [hcap2] at h_san_eq
             simp at h_san_eq
           · simp only [hcap2] at h_san_eq
-            -- Both advances: dest + promo, same dest means same source (1-2 ranks back)
-            -- But different source contradicts h_from_neq... need to derive
-            -- Actually for pawn advance, multiple sources could reach same dest
-            -- (single push vs double push) but that would have different SAN!
-            -- Double push: e4 (from e2)
-            -- Single push: e4 (from e3) - but only one is legal at a time
-            -- The key: legal pawn advance to rank 4/5 from rank 2/7 is double,
-            -- from rank 3/6 is single - never both legal simultaneously
-            sorry -- Pawn advance uniqueness
+            -- Both advances: dest + promo, same dest means same source
+            -- Key insight: For two legal pawn advances to same square,
+            -- sources must be the same because:
+            -- - Single push from (f, r-1) requires pawn at (f, r-1)
+            -- - Double push from (f, r-2) requires path clear (no piece at (f, r-1))
+            -- These are mutually exclusive in the same game state.
+            -- From fideLegal, both have gs.board fromSq = some piece
+            have h1_fide := Completeness.allLegalMoves_sound gs m1 h1_legal
+            have h2_fide := Completeness.allLegalMoves_sound gs m2 h2_legal
+            have h1_origin := h1_fide.2.1
+            have h2_origin := h2_fide.2.1
+            have h1_geom := h1_fide.2.2.1
+            have h2_geom := h2_fide.2.2.1
+            -- Both are pawn advances, so respectsGeometry gives isPawnAdvance
+            unfold respectsGeometry at h1_geom h2_geom
+            simp only [hp1, hp2, hcap1, hcap2, ite_true, ite_false] at h1_geom h2_geom
+            push_neg at hcap1 hcap2
+            simp only [hcap1.1, hcap2.1, ite_false] at h1_geom h2_geom
+            -- h1_geom, h2_geom: isPawnAdvance ∧ pathClear ∧ (double push → start rank)
+            obtain ⟨h1_adv, h1_path, h1_double⟩ := h1_geom
+            obtain ⟨h2_adv, h2_path, h2_double⟩ := h2_geom
+            -- Same file (pawn advance is same file)
+            have h1_file := pawn_advance_same_file gs m1 h1_legal hp1 hcap1
+            have h2_file := pawn_advance_same_file gs m2 h2_legal hp2 hcap2
+            -- Same destination means same file
+            rw [h_dest_eq] at h1_file
+            have h_file_eq : m1.fromSq.fileNat = m2.fromSq.fileNat := by
+              omega
+            -- For rank: isPawnAdvance constrains rankDiff to ±1 or ±2
+            -- With same dest rank and different source ranks:
+            -- - If m1 is single push (rank diff 1), m2 would be double (diff 2) or vice versa
+            -- - Double push requires path clear through single push position
+            -- - But single push means pawn is AT that position → path not clear
+            -- This is a contradiction, so sources must be same
+            exfalso
+            -- Different fromSq but same file means different ranks
+            have h_rank_neq : m1.fromSq.rankNat ≠ m2.fromSq.rankNat := by
+              intro h_rank_eq
+              apply h_from_neq
+              ext
+              · exact Fin.ext h_file_eq
+              · exact Fin.ext h_rank_eq
+            -- isPawnAdvance gives rankDiff = ±direction or ±2*direction
+            -- With same dest, different source ranks means one is ±1, other is ±2
+            -- But pathClear for ±2 requires empty at ±1 position
+            -- And ±1 move has pawn at ±1 position
+            -- Contradiction
+            sorry -- Path clear vs pawn presence contradiction
       · -- Piece moves (non-pawn): pieceLetter + dis + x? + dest + promo
         simp only [hp1] at h_san_eq
         have hp2 : m2.piece.pieceType ≠ PieceType.Pawn := by rw [← h_type_eq]; exact hp1
