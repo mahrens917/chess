@@ -1564,15 +1564,129 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
             have h_file_eq : m1.fromSq.fileChar = m2.fromSq.fileChar := by
               -- Pawn capture SAN format: fileChar ++ "x" ++ dest ++ promo
               -- First char is source file letter
-              -- For m1: String.singleton m1.fromSq.fileChar ++ "x" ++ ...
-              -- For m2: String.singleton m2.fromSq.fileChar ++ "x" ++ ...
-              -- From h_san_eq, these are equal, so first chars must be equal
-              sorry -- String first char extraction
+              -- Extract first character using String.take
+              simp only [moveToSanBase, hp1, hp2, hcap1, hcap2, ite_true] at h_san_eq
+              -- Now h_san_eq: String.singleton m1.fromSq.fileChar ++ "x" ++ ... =
+              --               String.singleton m2.fromSq.fileChar ++ "x" ++ ...
+              have h1_file : (String.singleton m1.fromSq.fileChar ++ "x" ++ m1.toSq.algebraic ++ promotionSuffix m1).take 1 =
+                             String.singleton m1.fromSq.fileChar := by
+                simp [String.take_append]
+              have h2_file : (String.singleton m2.fromSq.fileChar ++ "x" ++ m2.toSq.algebraic ++ promotionSuffix m2).take 1 =
+                             String.singleton m2.fromSq.fileChar := by
+                simp [String.take_append]
+              rw [h_san_eq] at h1_file
+              have : String.singleton m1.fromSq.fileChar = String.singleton m2.fromSq.fileChar := h1_file.symm.trans h2_file
+              simp [String.singleton] at this
+              exact this
             -- With same file and same capture geometry (diagonal one rank):
             -- isPawnCapture c from to means: fileDiff = ±1, rankDiff = pawnDirection
             -- Same dest + same file + capture → same rank (one rank back from dest)
             -- Therefore same fromSq
-            sorry -- Pawn capture geometry: same file + same dest → same source
+            -- Get isPawnCapture from legality
+            have h1_fide := Completeness.allLegalMoves_sound gs m1 h1_legal
+            have h2_fide := Completeness.allLegalMoves_sound gs m2 h2_legal
+            have h1_geom := h1_fide.2.2.1
+            have h2_geom := h2_fide.2.2.1
+            -- unfold respectsGeometry for pawn captures
+            unfold respectsGeometry at h1_geom h2_geom
+            simp only [hp1, hp2, ite_true] at h1_geom h2_geom
+            -- Now we have isPawnCapture for both (either regular or en passant)
+            cases hcap1 with
+            | inl h1_cap =>
+              simp only [h1_cap, ite_true, ite_false] at h1_geom
+              cases hcap2 with
+              | inl h2_cap =>
+                simp only [h2_cap, ite_true, ite_false] at h2_geom
+                -- Both regular captures: isPawnCapture ∧ isEnemyAt
+                have h1_capt := h1_geom.1
+                have h2_capt := h2_geom.1
+                -- isPawnCapture: rankDiff = pawnDirection
+                unfold Movement.isPawnCapture at h1_capt h2_capt
+                obtain ⟨_, _, h1_rank⟩ := h1_capt
+                obtain ⟨_, _, h2_rank⟩ := h2_capt
+                -- Same color means same pawnDirection
+                have h_color_eq : m1.piece.color = m2.piece.color := by
+                  have hc1 := h1_fide.1
+                  have hc2 := h2_fide.1
+                  rw [hc1, hc2]
+                unfold Movement.rankDiff at h1_rank h2_rank
+                -- Same dest rank + same pawnDirection → same source rank
+                have h_rank_eq : m1.fromSq.rankNat = m2.fromSq.rankNat := by
+                  rw [h_dest_eq, h_color_eq] at h1_rank
+                  omega
+                -- Same file + same rank = same square
+                ext
+                · -- Files equal
+                  have : m1.fromSq.fileNat = m2.fromSq.fileNat := by
+                    -- fileChar equal → fileNat equal
+                    have h := congr_arg Char.toNat h_file_eq
+                    simp only [Square.fileChar] at h
+                    omega
+                  exact Fin.ext this
+                · exact Fin.ext h_rank_eq
+              | inr h2_ep =>
+                simp only [h2_ep, ite_false, ite_true, not_true] at h2_geom h1_geom
+                -- m2 is en passant, same logic
+                have h1_capt := h1_geom.1
+                have h2_capt := h2_geom.1
+                unfold Movement.isPawnCapture at h1_capt h2_capt
+                obtain ⟨_, _, h1_rank⟩ := h1_capt
+                obtain ⟨_, _, h2_rank⟩ := h2_capt
+                have h_color_eq : m1.piece.color = m2.piece.color := by
+                  have hc1 := h1_fide.1; have hc2 := h2_fide.1
+                  rw [hc1, hc2]
+                unfold Movement.rankDiff at h1_rank h2_rank
+                have h_rank_eq : m1.fromSq.rankNat = m2.fromSq.rankNat := by
+                  rw [h_dest_eq, h_color_eq] at h1_rank; omega
+                ext
+                · have : m1.fromSq.fileNat = m2.fromSq.fileNat := by
+                    have h := congr_arg Char.toNat h_file_eq
+                    simp only [Square.fileChar] at h; omega
+                  exact Fin.ext this
+                · exact Fin.ext h_rank_eq
+            | inr h1_ep =>
+              simp only [h1_ep, ite_true, ite_false, not_true] at h1_geom h2_geom
+              cases hcap2 with
+              | inl h2_cap =>
+                simp only [h2_cap, ite_true, ite_false] at h2_geom
+                -- m1 en passant, m2 regular capture
+                have h1_capt := h1_geom.1
+                have h2_capt := h2_geom.1
+                unfold Movement.isPawnCapture at h1_capt h2_capt
+                obtain ⟨_, _, h1_rank⟩ := h1_capt
+                obtain ⟨_, _, h2_rank⟩ := h2_capt
+                have h_color_eq : m1.piece.color = m2.piece.color := by
+                  have hc1 := h1_fide.1; have hc2 := h2_fide.1
+                  rw [hc1, hc2]
+                unfold Movement.rankDiff at h1_rank h2_rank
+                have h_rank_eq : m1.fromSq.rankNat = m2.fromSq.rankNat := by
+                  rw [h_dest_eq, h_color_eq] at h1_rank; omega
+                ext
+                · have : m1.fromSq.fileNat = m2.fromSq.fileNat := by
+                    have h := congr_arg Char.toNat h_file_eq
+                    simp only [Square.fileChar] at h; omega
+                  exact Fin.ext this
+                · exact Fin.ext h_rank_eq
+              | inr h2_ep =>
+                simp only [h2_ep, ite_false, ite_true] at h2_geom
+                -- Both en passant
+                have h1_capt := h1_geom.1
+                have h2_capt := h2_geom.1
+                unfold Movement.isPawnCapture at h1_capt h2_capt
+                obtain ⟨_, _, h1_rank⟩ := h1_capt
+                obtain ⟨_, _, h2_rank⟩ := h2_capt
+                have h_color_eq : m1.piece.color = m2.piece.color := by
+                  have hc1 := h1_fide.1; have hc2 := h2_fide.1
+                  rw [hc1, hc2]
+                unfold Movement.rankDiff at h1_rank h2_rank
+                have h_rank_eq : m1.fromSq.rankNat = m2.fromSq.rankNat := by
+                  rw [h_dest_eq, h_color_eq] at h1_rank; omega
+                ext
+                · have : m1.fromSq.fileNat = m2.fromSq.fileNat := by
+                    have h := congr_arg Char.toNat h_file_eq
+                    simp only [Square.fileChar] at h; omega
+                  exact Fin.ext this
+                · exact Fin.ext h_rank_eq
           · simp only [hcap2] at h_san_eq
             -- m1 capture (has "x"), m2 advance (no "x") - different formats
             simp at h_san_eq
