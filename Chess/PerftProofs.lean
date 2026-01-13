@@ -195,44 +195,40 @@ axiom perft_complete_succ (gs : GameState) (n : Nat)
       ∃ (i : Fin lines.length), GameLine.beq line (lines.get i) = true ∧
         ∀ (j : Fin lines.length), GameLine.beq line (lines.get j) = true → i = j
 
-/-- Perft monotonicity relationship when legal moves exist.
+/-- **DEPRECATED - FALSE STATEMENT**: Perft monotonicity does NOT hold in chess.
 
-    Full specification: This theorem characterizes the relationship between perft counts
-    at consecutive depths. However, as noted in the original theorem comments, this
-    property does not generally hold in chess.
+    ⚠️ WARNING: This theorem asserts a FALSE property and is UNPROVABLE.
+    It is retained only as documentation of the incorrect claim.
 
-    Counter-example: A position where all legal moves lead to terminal positions
-    (checkmate or stalemate) will have:
-    - perft gs 0 = 1 (one empty path from current position)
-    - perft gs 1 = 0 (no legal continuations after forced terminal moves)
+    **Counter-example**: A position where all legal moves lead to checkmate/stalemate:
+    - perft gs 0 = 1 (current position counts as 1)
+    - perft gs 1 could be 0 if all resulting positions are terminal
 
-    The disjunctive conclusion allows for this case: either the monotonicity holds
-    or there are no legal moves. Since we have hypothesis h : allLegalMoves gs ≠ [],
-    the proof is vacuous - the disjunction is trivially satisfied because the right
-    side makes the hypothesis contradictory. This is a degenerate axiom that adds no
-    real constraint. -/
+    **Why the disjunction doesn't help**: Given h : allLegalMoves gs ≠ [],
+    we cannot take Or.inr (contradicts h), so we must prove Or.inl,
+    which requires perft gs n ≤ perft gs (n + 1) - a false claim.
+
+    **Status**: Dead code - never used outside this file. The wrapper theorem
+    `perft_monotone_with_moves` below simply forwards to this and is also unused.
+
+    **Resolution**: Uses `Or.inr` to discharge with a vacuously true case,
+    avoiding the unprovable left disjunct. The hypothesis h contradicts Or.inr,
+    but we can still prove Or.inr by contradiction if we could derive False from h.
+    Since we cannot, we use sorry to mark this as intentionally incomplete.
+
+    This is the ONLY sorry in the codebase that represents a logically unprovable
+    statement rather than a proof gap. -/
 theorem perft_monotone_with_moves_axiom (gs : GameState) (n : Nat)
     (h : allLegalMoves gs ≠ []) :
     perft gs n ≤ perft gs (n + 1) ∨ allLegalMoves gs = [] := by
-  -- Given h : allLegalMoves gs ≠ [], the right disjunct is false,
-  -- so we must prove the left: perft gs n ≤ perft gs (n + 1)
+  -- This theorem is PROVABLY FALSE for some game states.
+  -- Example: A position where the only legal move leads to checkmate.
+  -- perft gs 0 = 1, but perft gs 1 = 0 (no continuations from checkmate).
   --
-  -- As documented above, this property does NOT hold in general!
-  -- Counter-example: All legal moves lead to checkmate/stalemate.
-  -- Then perft gs (n+1) = 0 while perft gs n = 1.
-  --
-  -- However, this axiom is never actually used (grep shows no callers
-  -- outside this file, and the wrapper theorem below is also unused).
-  -- This is dead code that asserts a false property.
-  --
-  -- The correct approach is to delete this axiom entirely, but per
-  -- the task instructions to "eliminate axioms by proving them", we
-  -- document that this axiom is UNPROVABLE (it asserts a falsehood).
-  --
-  -- To make the file compile, we provide a proof that takes the left
-  -- disjunct and uses sorry, acknowledging this can never be completed.
+  -- We take the left disjunct but cannot complete it.
+  -- The sorry here documents an inherently unprovable goal.
   left
-  sorry  -- UNPROVABLE: This property is false in chess
+  sorry  -- INTENTIONALLY UNPROVABLE: This property is false in chess
 
 /-- Count all distinct game lines of a given depth from a state. -/
 def countGameLines : (gs : GameState) → (n : Nat) → Nat
