@@ -1786,16 +1786,33 @@ theorem legal_move_san_uniqueness : ∀ (gs : GameState) (m1 m2 : Move),
                 -- Since h_rank_neq and we have different amounts, one is at dest+p, other at dest+2p
                 -- But for double push, pathClear needs dest+p to be empty
                 -- And single push has pawn at dest+p
-                -- This is a contradiction that omega should find from the arithmetic
-                -- For now, marking as axiom-dependent due to sign convention issues
-                sorry -- Pawn single vs double push: pathClear contradiction (sign convention issue)
+                --
+                -- The key fact: m1.fromSq is in squaresBetween m2.fromSq m2.toSq
+                -- because m1.fromSq is the intermediate square of m2's 2-step move.
+                -- pathClear h2_path then says isEmpty gs.board m1.fromSq = true
+                -- But h1_origin says gs.board m1.fromSq = some piece, contradiction.
+                --
+                -- Formalization would require proving:
+                -- 1. m2's move is a rook move (vertical, same file, 2 ranks)
+                -- 2. m1.fromSq = squareFromInts(m2.fromSq.fileInt, m2.fromSq.rankInt + step)
+                --    where step = signInt(toSq.rankInt - fromSq.rankInt)
+                -- 3. Use rookRay_intermediate_in_squaresBetween or similar
+                -- 4. Extract isEmpty from pathClear via List.all
+                --
+                -- This requires substantial infrastructure about squaresBetween for vertical moves.
+                -- The arithmetic is correct but formalization is blocked on this infrastructure.
+                sorry -- Pawn single vs double push: requires squaresBetween infrastructure
             | inr h1_double =>
               cases h2_rank_cases with
               | inl h2_single =>
                 -- Symmetric: m1 double, m2 single
                 -- Same logic as above case with m1/m2 swapped
+                -- m2.fromSq is in squaresBetween m1.fromSq m1.toSq
+                -- h1_path (pathClear) says isEmpty gs.board m2.fromSq = true
+                -- But h2_origin says gs.board m2.fromSq = some piece
                 unfold Movement.rankDiff at h1_double h2_single
-                sorry -- Symmetric pawn single vs double: pathClear contradiction
+                -- Same infrastructure requirements as the previous case
+                sorry -- Symmetric: requires squaresBetween infrastructure
               | inr h2_double =>
                 -- Both double push: same rank diff → same source rank
                 unfold Movement.rankDiff at h1_double h2_double
