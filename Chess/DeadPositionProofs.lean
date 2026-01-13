@@ -5,7 +5,40 @@ namespace Rules
 
 open PieceType Color
 
+-- ============================================================================
+-- POSITION VALIDITY PREDICATES
+-- ============================================================================
+
+/-- A position has valid king configuration if there's at most one king per color. -/
+def hasValidKings (b : Board) : Prop :=
+  (∀ sq1 sq2, (∃ p1, b sq1 = some p1 ∧ p1.pieceType = PieceType.King ∧ p1.color = Color.White) →
+              (∃ p2, b sq2 = some p2 ∧ p2.pieceType = PieceType.King ∧ p2.color = Color.White) →
+              sq1 = sq2) ∧
+  (∀ sq1 sq2, (∃ p1, b sq1 = some p1 ∧ p1.pieceType = PieceType.King ∧ p1.color = Color.Black) →
+              (∃ p2, b sq2 = some p2 ∧ p2.pieceType = PieceType.King ∧ p2.color = Color.Black) →
+              sq1 = sq2)
+
+/-- Two squares are adjacent if they differ by at most 1 in both file and rank. -/
+def squaresAdjacent (sq1 sq2 : Square) : Bool :=
+  let fd := if sq1.fileInt ≥ sq2.fileInt then sq1.fileInt - sq2.fileInt else sq2.fileInt - sq1.fileInt
+  let rd := if sq1.rankInt ≥ sq2.rankInt then sq1.rankInt - sq2.rankInt else sq2.rankInt - sq1.rankInt
+  fd ≤ 1 && rd ≤ 1 && (fd > 0 || rd > 0)
+
+/-- In a legal position, the two kings are never adjacent.
+    This is required by FIDE chess rules - a king cannot move into check. -/
+def kingsNotAdjacent (b : Board) : Prop :=
+  ∀ sq1 sq2,
+    (∃ p1, b sq1 = some p1 ∧ p1.pieceType = PieceType.King ∧ p1.color = Color.White) →
+    (∃ p2, b sq2 = some p2 ∧ p2.pieceType = PieceType.King ∧ p2.color = Color.Black) →
+    squaresAdjacent sq1 sq2 = false
+
+/-- A legal position has valid kings that are not adjacent. -/
+def isLegalPosition (b : Board) : Prop :=
+  hasValidKings b ∧ kingsNotAdjacent b
+
+-- ============================================================================
 -- Helper predicates for material configurations
+-- ============================================================================
 
 def whiteHasOnlyKing (gs : GameState) : Prop :=
   ∀ sq : Square, ∀ p : Piece,
@@ -31,26 +64,48 @@ def bishopsOnSameColorSquares (gs : GameState) : Prop :=
       gs.board sq = some p → p.pieceType = PieceType.Bishop →
         squareIsLight sq = isLight
 
-/-- Helper axiom: With only kings on the board, the position can never be checkmate.
+/-- Helper theorem: With only kings on the board and a legal position, checkmate is impossible.
     Kings cannot attack each other (chess rule: king must be at least 1 square away).
     Since there are no other pieces, no other unit can deliver check.
-    Therefore, inCheck is always false, and checkmate is impossible. -/
+    Therefore, inCheck is always false, and checkmate is impossible.
+
+    **Hypotheses**:
+    - h: Only kings are on the board
+    - h_legal: The position is legal (kings not adjacent)
+
+    **Proof strategy**: Since kings are not adjacent (h_legal) and there are no other pieces (h),
+    neither king can be in check. Thus isCheckmate is false. -/
 axiom kingVsKing_no_checkmate (gs : GameState)
-    (h : countNonKingPieces gs = 0) :
+    (h : countNonKingPieces gs = 0)
+    (h_legal : isLegalPosition gs.board) :
     ¬(Rules.isCheckmate (applyMoveSequence gs []))
 
 /-- Helper: Any move from a king-only position results in a king-only position.
-    Since only kings can move, and a moving king remains a king, the board
-    remains in the king-only state. -/
-axiom kingOnly_preserved_by_moves (gs : GameState)
-    (h : countNonKingPieces gs = 0)
-    (m : Move) :
+    Since the only pieces are kings, and playMove either moves a king (which stays a king)
+    or operates on non-existent pieces (which is a no-op for piece count).
+
+    **Hypotheses**:
+    - h: Only kings are on the board
+
+    **Proof strategy**: playMove can only move pieces that exist. Since only kings exist,
+    only kings can move, and they remain kings after moving. -/
+axiom kingOnly_preserved_by_moves (gs : GameState) (m : Move)
+    (h : countNonKingPieces gs = 0) :
     countNonKingPieces (GameState.playMove gs m) = 0
+
+/-- Legal position is preserved by any move when only kings exist.
+    Since neither king can capture the other (would require adjacent kings,
+    which is illegal), kings remain non-adjacent after any move. -/
+axiom legalPosition_preserved_kingOnly (gs : GameState) (m : Move)
+    (h_pos : isLegalPosition gs.board)
+    (h_kings : countNonKingPieces gs = 0) :
+    isLegalPosition (GameState.playMove gs m).board
 
 -- Theorem 1: King vs King is a dead position
 -- Strategy: With only kings, no captures possible, kings cannot check each other
 theorem king_vs_king_dead (gs : GameState)
-    (h : countNonKingPieces gs = 0) :
+    (h : countNonKingPieces gs = 0)
+    (h_legal : isLegalPosition gs.board) :
     isDeadPosition gs := by
   unfold isDeadPosition
   intro moves _hmate
@@ -60,16 +115,18 @@ theorem king_vs_king_dead (gs : GameState)
     -- Any sequence of moves from a king-only position results in a king-only position
     -- And king-only positions cannot be checkmate
     clear _hmate  -- We'll derive a contradiction
-    induction moves generalizing gs with
+    induction moves generalizing gs h h_legal with
     | nil =>
       -- Base case: no moves, position is king-only
-      exact kingVsKing_no_checkmate gs h
+      exact kingVsKing_no_checkmate gs h h_legal
     | cons m rest_moves ih =>
-      -- After one move: position still king-only
+      -- After one move: position still king-only and legal
       have h_next : countNonKingPieces (GameState.playMove gs m) = 0 :=
-        kingOnly_preserved_by_moves gs h m
+        kingOnly_preserved_by_moves gs m h
+      have h_next_legal : isLegalPosition (GameState.playMove gs m).board :=
+        legalPosition_preserved_kingOnly gs m h_legal h
       -- Apply IH to the rest of the moves
-      exact ih h_next
+      exact ih h_next h_next_legal
   exact this _hmate
 
 /-- Endgame axiom: King + Knight vs King cannot reach checkmate.

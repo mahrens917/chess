@@ -9,6 +9,290 @@ namespace Parsing
 -- ============================================================================
 
 -- ============================================================================
+-- BOARD VALIDITY PREDICATES
+-- ============================================================================
+
+/-- A board has at most one king of the given color.
+    This is a fundamental invariant for valid chess positions. -/
+def hasAtMostOneKing (b : Board) (c : Color) : Prop :=
+  ∀ sq1 sq2 : Square,
+    (∃ p1, b sq1 = some p1 ∧ p1.pieceType = PieceType.King ∧ p1.color = c) →
+    (∃ p2, b sq2 = some p2 ∧ p2.pieceType = PieceType.King ∧ p2.color = c) →
+    sq1 = sq2
+
+/-- A board has valid king configuration (at most one king per color). -/
+def hasValidKings (b : Board) : Prop :=
+  hasAtMostOneKing b Color.White ∧ hasAtMostOneKing b Color.Black
+
+/-- Helper: If two squares both have kings of the same color and there's at most one,
+    the squares are equal. -/
+lemma king_squares_eq_of_unique (b : Board) (c : Color) (sq1 sq2 : Square)
+    (h_unique : hasAtMostOneKing b c)
+    (h1 : ∃ p, b sq1 = some p ∧ p.pieceType = PieceType.King ∧ p.color = c)
+    (h2 : ∃ p, b sq2 = some p ∧ p.pieceType = PieceType.King ∧ p.color = c) :
+    sq1 = sq2 :=
+  h_unique sq1 sq2 h1 h2
+
+/-- Helper: If two squares have the same king (unique), the pieces are equal. -/
+lemma king_piece_eq_of_unique (b : Board) (c : Color) (sq1 sq2 : Square) (p1 p2 : Piece)
+    (h_unique : hasAtMostOneKing b c)
+    (h1 : b sq1 = some p1 ∧ p1.pieceType = PieceType.King ∧ p1.color = c)
+    (h2 : b sq2 = some p2 ∧ p2.pieceType = PieceType.King ∧ p2.color = c) :
+    p1 = p2 := by
+  have hsq : sq1 = sq2 := h_unique sq1 sq2 ⟨p1, h1⟩ ⟨p2, h2⟩
+  subst hsq
+  rw [h1.1] at h2
+  exact Option.some_injective _ h2.1
+
+-- ============================================================================
+-- HELPER LEMMAS: slidingTargets and pawn move properties
+-- ============================================================================
+
+/-- Helper: Moves produced by slidingTargets.walk all have piece = p and fromSq = src.
+    This follows directly from the move construction in walk. -/
+private lemma slidingTargets_walk_piece_fromSq
+    (gs : GameState) (src : Square) (p : Piece) (df dr : Int) (step : Nat) (acc : List Move)
+    (h_acc : ∀ m ∈ acc, m.piece = p ∧ m.fromSq = src) :
+    ∀ m ∈ Rules.slidingTargets.walk gs.board p.color p src df dr step acc,
+      m.piece = p ∧ m.fromSq = src := by
+  induction step generalizing acc with
+  | zero =>
+    simp only [Rules.slidingTargets.walk]
+    exact h_acc
+  | succ s ih =>
+    simp only [Rules.slidingTargets.walk]
+    split
+    · -- squareFromInts = none
+      exact h_acc
+    · -- squareFromInts = some target
+      rename_i target _
+      split
+      · -- isEmpty board target
+        apply ih
+        intro m hm
+        simp only [List.mem_cons] at hm
+        cases hm with
+        | inl heq => simp [← heq]
+        | inr h_in_acc => exact h_acc m h_in_acc
+      · split
+        · -- isEnemyAt
+          intro m hm
+          simp only [List.mem_cons] at hm
+          cases hm with
+          | inl heq => simp [← heq]
+          | inr h_in_acc => exact h_acc m h_in_acc
+        · -- blocked by own piece
+          exact h_acc
+
+/-- Helper: Moves produced by slidingTargets all have piece = p and fromSq = src. -/
+lemma slidingTargets_piece_fromSq (gs : GameState) (src : Square) (p : Piece)
+    (deltas : List (Int × Int)) (m : Move) :
+    m ∈ Rules.slidingTargets gs src p deltas → m.piece = p ∧ m.fromSq = src := by
+  intro hmem
+  unfold Rules.slidingTargets at hmem
+  -- slidingTargets uses foldr with walk
+  induction deltas with
+  | nil => simp at hmem
+  | cons d rest ih =>
+    simp only [List.foldr] at hmem
+    have h_walk := slidingTargets_walk_piece_fromSq gs src p d.1 d.2 7
+      (List.foldr (fun d acc => Rules.slidingTargets.walk gs.board p.color p src d.1 d.2 7 acc) [] rest)
+    apply h_walk
+    · intro m' hm'
+      exact ih hm'
+    · exact hmem
+
+/-- Helper: promotionMoves preserves piece and fromSq. -/
+lemma promotionMoves_piece_fromSq (m m' : Move) :
+    m' ∈ Rules.promotionMoves m → m'.piece = m.piece ∧ m'.fromSq = m.fromSq := by
+  intro hmem
+  unfold Rules.promotionMoves at hmem
+  split at hmem
+  · -- promotion case
+    simp only [List.mem_map] at hmem
+    obtain ⟨pt, _, heq⟩ := hmem
+    simp [← heq]
+  · -- no promotion
+    simp only [List.mem_singleton] at hmem
+    simp [hmem]
+
+/-- Helper: Pawn forward moves have piece = p and fromSq = src.
+    This traces through the forwardMoves construction. -/
+private lemma pawn_forwardMoves_piece_fromSq
+    (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (hm : m ∈ (match Movement.squareFromInts src.fileInt (src.rankInt + Movement.pawnDirection p.color) with
+      | some target =>
+          if Rules.isEmpty gs.board target then
+            let base := [{ piece := p, fromSq := src, toSq := target : Move }]
+            let doubleStep :=
+              if src.rankNat = Rules.pawnStartRank p.color then
+                match Movement.squareFromInts src.fileInt (src.rankInt + 2 * Movement.pawnDirection p.color) with
+                | some target2 =>
+                    if Rules.isEmpty gs.board target2 then
+                      [{ piece := p, fromSq := src, toSq := target2 : Move }]
+                    else []
+                | none => []
+              else []
+            base ++ doubleStep
+          else []
+      | none => [])) :
+    m.piece = p ∧ m.fromSq = src := by
+  split at hm
+  · -- oneStep = some target
+    rename_i target _
+    split at hm
+    · -- isEmpty
+      simp only [List.mem_append, List.mem_singleton] at hm
+      cases hm with
+      | inl heq => simp [← heq]
+      | inr h_double =>
+        split at h_double
+        · -- at pawn start rank
+          split at h_double
+          · -- twoStep = some target2
+            split at h_double
+            · -- isEmpty target2
+              simp only [List.mem_singleton] at h_double
+              simp [← h_double]
+            · simp at h_double
+          · simp at h_double
+        · simp at h_double
+    · simp at hm
+  · simp at hm
+
+/-- Helper: Pawn capture moves have piece = p and fromSq = src.
+    This traces through the captureMoves construction. -/
+private lemma pawn_captureMoves_piece_fromSq
+    (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (hm : m ∈ ([-1, 1] : List Int).foldr
+      (fun df acc =>
+        match Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection p.color) with
+        | some target =>
+            if Rules.isEnemyAt gs.board p.color target then
+              Rules.promotionMoves { piece := p, fromSq := src, toSq := target, isCapture := true } ++ acc
+            else if gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target then
+              { piece := p, fromSq := src, toSq := target, isCapture := true, isEnPassant := true } :: acc
+            else acc
+        | none => acc)
+      []) :
+    m.piece = p ∧ m.fromSq = src := by
+  -- The foldr processes [-1, 1] and accumulates moves
+  simp only [List.foldr] at hm
+  -- Process first element (-1)
+  split at hm
+  · -- squareFromInts for df=-1 succeeds
+    rename_i target1 _
+    split at hm
+    · -- isEnemyAt
+      rw [List.mem_append] at hm
+      cases hm with
+      | inl h_promo =>
+        have := promotionMoves_piece_fromSq _ m h_promo
+        simp_all
+      | inr h_rest =>
+        -- Process second element (1)
+        split at h_rest
+        · rename_i target2 _
+          split at h_rest
+          · rw [List.mem_append] at h_rest
+            cases h_rest with
+            | inl h_promo => have := promotionMoves_piece_fromSq _ m h_promo; simp_all
+            | inr h_nil => simp at h_nil
+          · split at h_rest
+            · simp only [List.mem_cons, List.not_mem_nil, or_false] at h_rest
+              simp [← h_rest]
+            · simp at h_rest
+        · simp at h_rest
+    · split at hm
+      · -- en passant case
+        simp only [List.mem_cons] at hm
+        cases hm with
+        | inl heq => simp [← heq]
+        | inr h_rest =>
+          split at h_rest
+          · rename_i target2 _
+            split at h_rest
+            · rw [List.mem_append] at h_rest
+              cases h_rest with
+              | inl h_promo => have := promotionMoves_piece_fromSq _ m h_promo; simp_all
+              | inr h_nil => simp at h_nil
+            · split at h_rest
+              · simp only [List.mem_cons, List.not_mem_nil, or_false] at h_rest
+                simp [← h_rest]
+              · simp at h_rest
+          · simp at h_rest
+      · -- blocked
+        split at hm
+        · rename_i target2 _
+          split at hm
+          · rw [List.mem_append] at hm
+            cases hm with
+            | inl h_promo => have := promotionMoves_piece_fromSq _ m h_promo; simp_all
+            | inr h_nil => simp at h_nil
+          · split at hm
+            · simp only [List.mem_cons, List.not_mem_nil, or_false] at hm
+              simp [← hm]
+            · simp at hm
+        · simp at hm
+  · -- squareFromInts for df=-1 fails
+    split at hm
+    · rename_i target2 _
+      split at hm
+      · rw [List.mem_append] at hm
+        cases hm with
+        | inl h_promo => have := promotionMoves_piece_fromSq _ m h_promo; simp_all
+        | inr h_nil => simp at h_nil
+      · split at hm
+        · simp only [List.mem_cons, List.not_mem_nil, or_false] at hm
+          simp [← hm]
+        · simp at hm
+    · simp at hm
+
+/-- Helper: All pawn moves have piece = p and fromSq = src.
+    Combines forward and capture move analysis. -/
+lemma pawn_pieceTargets_piece_fromSq (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (hp : p.pieceType = PieceType.Pawn) :
+    m ∈ Rules.pieceTargets gs src p → m.piece = p ∧ m.fromSq = src := by
+  intro hmem
+  unfold Rules.pieceTargets at hmem
+  simp only [hp] at hmem
+  -- Pawn targets = forwardMoves.foldr promotionMoves ++ captureMoves
+  rw [List.mem_append] at hmem
+  cases hmem with
+  | inl h_forward =>
+    -- m is in forwardMoves.foldr promotionMoves
+    simp only [List.foldr_cons, List.foldr_nil] at h_forward
+    -- Each move goes through promotionMoves, which preserves piece and fromSq
+    -- First we need to show the base moves have the right structure
+    have h_orig : ∃ m_orig, m_orig.piece = p ∧ m_orig.fromSq = src ∧ m ∈ Rules.promotionMoves m_orig := by
+      -- Trace through the foldr structure
+      split at h_forward
+      · rename_i target _
+        split at h_forward
+        · -- isEmpty
+          simp only [List.mem_append, List.foldr_cons, List.foldr_nil] at h_forward
+          cases h_forward with
+          | inl h_base =>
+            exact ⟨{ piece := p, fromSq := src, toSq := target }, rfl, rfl, h_base⟩
+          | inr h_double =>
+            split at h_double
+            · split at h_double
+              · split at h_double
+                · rename_i target2 _ _
+                  simp only [List.mem_append, List.mem_nil_iff, or_false] at h_double
+                  exact ⟨{ piece := p, fromSq := src, toSq := target2 }, rfl, rfl, h_double⟩
+                · simp at h_double
+              · simp at h_double
+            · simp at h_double
+        · simp at h_forward
+      · simp at h_forward
+    obtain ⟨m_orig, hpiece_orig, hfrom_orig, h_promo⟩ := h_orig
+    have := promotionMoves_piece_fromSq m_orig m h_promo
+    simp_all
+  | inr h_capture =>
+    exact pawn_captureMoves_piece_fromSq gs src p m h_capture
+
+-- ============================================================================
 -- HELPER LEMMAS: Properties of allLegalMoves membership
 -- ============================================================================
 
@@ -20,8 +304,12 @@ namespace Parsing
     3. pieceTargets always sets move.piece = p (the piece at the generating square)
     4. Therefore m.piece.color = p.color = gs.toMove
 
+    **Hypotheses**:
+    - h_valid: At most one king per color (needed for castle uniqueness proof)
+
     **Computational verification**: All 14 test suites pass, confirming this invariant holds. -/
-lemma allLegalMoves_turnMatches (gs : GameState) (m : Move) :
+lemma allLegalMoves_turnMatches (gs : GameState) (m : Move)
+    (h_valid : hasValidKings gs.board) :
     m ∈ Rules.allLegalMoves gs → m.piece.color = gs.toMove := by
   intro hmem
   unfold Rules.allLegalMoves at hmem
@@ -51,7 +339,7 @@ lemma allLegalMoves_turnMatches (gs : GameState) (m : Move) :
           obtain ⟨⟨hpin, _⟩, _⟩ := h_in_sq
           -- All moves from pieceTargets have piece = p by construction
           -- pieceTargets generates moves with { piece := p, ... } in all cases
-          have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m hboard hpin
+          have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m h_valid hcolor hboard hpin
           rw [hpiece]
           exact hcolor
     | inr h_in_rest =>
@@ -59,38 +347,202 @@ lemma allLegalMoves_turnMatches (gs : GameState) (m : Move) :
 
 /-- Helper: pieceTargets always sets move.piece to the given piece p.
 
-    Proof outline by case analysis on piece type:
-    - King standard: filterMap constructs moves with { piece := p, ... }
-    - King castle: castleMoveIfLegal uses k from board at cfg.kingFrom. With gs.board sq = some p
-      and sq = cfg.kingFrom (from pieceTargets_sets_fromSq), we get k = p.
-    - Queen/Rook/Bishop: slidingTargets constructs moves with { piece := p, ... }
-    - Knight: filterMap constructs moves with { piece := p, ... }
-    - Pawn: all moves use { piece := p, ... }
+    Proof by case analysis on piece type. For castle moves, we use hasValidKings
+    to show that if two squares have kings of the same color, they must be equal.
 
-    The hypothesis gs.board sq = some p ensures castle case works (one king per side).
-
-    Axiomatized because castle case requires game-state validity reasoning. -/
-axiom pieceTargets_sets_piece (gs : GameState) (sq : Square) (p : Piece) (m : Move) :
+    Hypotheses:
+    - h_valid: At most one king per color (for castle uniqueness)
+    - h_turn: The piece is the current player's (for castle color matching) -/
+theorem pieceTargets_sets_piece (gs : GameState) (sq : Square) (p : Piece) (m : Move)
+    (h_valid : hasValidKings gs.board)
+    (h_turn : p.color = gs.toMove) :
     gs.board sq = some p →
-    m ∈ Rules.pieceTargets gs sq p → m.piece = p
+    m ∈ Rules.pieceTargets gs sq p → m.piece = p := by
+  intro hboard hmem
+  unfold Rules.pieceTargets at hmem
+  cases hp : p.pieceType with
+  | King =>
+    simp only [hp] at hmem
+    rw [List.mem_append] at hmem
+    cases hmem with
+    | inl h_std =>
+      -- Standard king move: { piece := p, ... }
+      simp only [List.mem_filterMap] at h_std
+      obtain ⟨target, _, h_some⟩ := h_std
+      split at h_some <;> try exact Option.noConfusion h_some
+      split at h_some
+      · simp only [Option.some.injEq] at h_some; rw [← h_some]
+      · simp only [Option.some.injEq] at h_some; rw [← h_some]
+    | inr h_castle =>
+      -- Castle move: piece = k from cfg.kingFrom
+      simp only [List.mem_filterMap, List.mem_cons, List.mem_singleton] at h_castle
+      obtain ⟨opt, h_in_opts, h_some⟩ := h_castle
+      cases h_in_opts with
+      | inl h_ks =>
+        unfold Rules.castleMoveIfLegal at h_some
+        split at h_some <;> try exact Option.noConfusion h_some
+        split at h_some <;> try exact Option.noConfusion h_some
+        rename_i k r h_k h_r
+        split at h_some <;> try exact Option.noConfusion h_some
+        rename_i h_cond
+        split at h_some <;> try exact Option.noConfusion h_some
+        simp only [Option.some.injEq] at h_some
+        rw [← h_some]
+        -- k and p are both kings of gs.toMove; by uniqueness k = p
+        have h_unique := if hc : gs.toMove = Color.White then h_valid.1 else h_valid.2
+        have h1 : gs.board sq = some p ∧ p.pieceType = PieceType.King ∧ p.color = gs.toMove :=
+          ⟨hboard, hp, h_turn⟩
+        have cfg := Rules.castleConfig gs.toMove true
+        have h2 : gs.board cfg.kingFrom = some k ∧ k.pieceType = PieceType.King ∧ k.color = gs.toMove :=
+          ⟨h_k, h_cond.1, h_cond.2.1⟩
+        exact king_piece_eq_of_unique gs.board gs.toMove sq cfg.kingFrom p k
+          (by cases gs.toMove <;> simp_all [hasValidKings]) h1 h2
+      | inr h_qs =>
+        cases h_qs with
+        | inl h_qs' =>
+          unfold Rules.castleMoveIfLegal at h_some
+          split at h_some <;> try exact Option.noConfusion h_some
+          split at h_some <;> try exact Option.noConfusion h_some
+          rename_i k r h_k h_r
+          split at h_some <;> try exact Option.noConfusion h_some
+          rename_i h_cond
+          split at h_some <;> try exact Option.noConfusion h_some
+          simp only [Option.some.injEq] at h_some
+          rw [← h_some]
+          have h1 : gs.board sq = some p ∧ p.pieceType = PieceType.King ∧ p.color = gs.toMove :=
+            ⟨hboard, hp, h_turn⟩
+          have cfg := Rules.castleConfig gs.toMove false
+          have h2 : gs.board cfg.kingFrom = some k ∧ k.pieceType = PieceType.King ∧ k.color = gs.toMove :=
+            ⟨h_k, h_cond.1, h_cond.2.1⟩
+          exact king_piece_eq_of_unique gs.board gs.toMove sq cfg.kingFrom p k
+            (by cases gs.toMove <;> simp_all [hasValidKings]) h1 h2
+        | inr h_nil => simp at h_nil
+  | Queen =>
+    simp only [hp] at hmem
+    -- Queen uses slidingTargets which always sets piece = p
+    have := slidingTargets_piece_fromSq gs sq p
+      [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] m hmem
+    exact this.1
+  | Rook =>
+    simp only [hp] at hmem
+    -- Rook uses slidingTargets which always sets piece = p
+    have := slidingTargets_piece_fromSq gs sq p [(1, 0), (-1, 0), (0, 1), (0, -1)] m hmem
+    exact this.1
+  | Bishop =>
+    simp only [hp] at hmem
+    -- Bishop uses slidingTargets which always sets piece = p
+    have := slidingTargets_piece_fromSq gs sq p [(1, 1), (-1, -1), (1, -1), (-1, 1)] m hmem
+    exact this.1
+  | Knight =>
+    simp only [hp] at hmem
+    simp only [List.mem_filterMap] at hmem
+    obtain ⟨target, _, h_some⟩ := hmem
+    split at h_some <;> try exact Option.noConfusion h_some
+    split at h_some
+    · simp only [Option.some.injEq] at h_some; rw [← h_some]
+    · simp only [Option.some.injEq] at h_some; rw [← h_some]
+  | Pawn =>
+    -- Pawn moves all set piece = p
+    have := pawn_pieceTargets_piece_fromSq gs sq p m hp hmem
+    exact this.1
 
 /-- Helper: pieceTargets always sets move.fromSq to the source square.
 
-    **Proof sketch**: By case analysis on piece type:
-    - King standard: filterMap constructs moves with { fromSq := src, ... }
-    - King castle: fromSq = cfg.kingFrom. With gs.board sq = some p and p a king,
-      the castle move's piece comes from cfg.kingFrom. Since there's one king per side,
-      if both sq and cfg.kingFrom have the king, sq = cfg.kingFrom.
-    - Queen/Rook/Bishop: slidingTargets constructs moves with { fromSq := src, ... }
-    - Knight: filterMap constructs moves with { fromSq := src, ... }
-    - Pawn: all moves use { fromSq := src, ... }
+    Proof by case analysis on piece type. For castle moves, we use hasValidKings
+    to show that cfg.kingFrom = sq since both have the unique king.
 
-    The hypothesis gs.board sq = some p ensures proper behavior for castle case.
-
-    **Axiomatized**: Castle uniqueness (one king per side) is game-state property. -/
-axiom pieceTargets_sets_fromSq (gs : GameState) (sq : Square) (p : Piece) (m : Move) :
+    Hypotheses:
+    - h_valid: At most one king per color (for castle uniqueness)
+    - h_turn: The piece is the current player's (for castle color matching) -/
+theorem pieceTargets_sets_fromSq (gs : GameState) (sq : Square) (p : Piece) (m : Move)
+    (h_valid : hasValidKings gs.board)
+    (h_turn : p.color = gs.toMove) :
     gs.board sq = some p →
-    m ∈ Rules.pieceTargets gs sq p → m.fromSq = sq
+    m ∈ Rules.pieceTargets gs sq p → m.fromSq = sq := by
+  intro hboard hmem
+  unfold Rules.pieceTargets at hmem
+  cases hp : p.pieceType with
+  | King =>
+    simp only [hp] at hmem
+    rw [List.mem_append] at hmem
+    cases hmem with
+    | inl h_std =>
+      simp only [List.mem_filterMap] at h_std
+      obtain ⟨target, _, h_some⟩ := h_std
+      split at h_some <;> try exact Option.noConfusion h_some
+      split at h_some
+      · simp only [Option.some.injEq] at h_some; rw [← h_some]
+      · simp only [Option.some.injEq] at h_some; rw [← h_some]
+    | inr h_castle =>
+      simp only [List.mem_filterMap, List.mem_cons, List.mem_singleton] at h_castle
+      obtain ⟨opt, h_in_opts, h_some⟩ := h_castle
+      cases h_in_opts with
+      | inl h_ks =>
+        unfold Rules.castleMoveIfLegal at h_some
+        split at h_some <;> try exact Option.noConfusion h_some
+        split at h_some <;> try exact Option.noConfusion h_some
+        rename_i k r h_k h_r
+        split at h_some <;> try exact Option.noConfusion h_some
+        rename_i h_cond
+        split at h_some <;> try exact Option.noConfusion h_some
+        simp only [Option.some.injEq] at h_some
+        rw [← h_some]
+        -- m.fromSq = cfg.kingFrom; show cfg.kingFrom = sq
+        have h1 : ∃ p', gs.board sq = some p' ∧ p'.pieceType = PieceType.King ∧ p'.color = gs.toMove :=
+          ⟨p, hboard, hp, h_turn⟩
+        have cfg := Rules.castleConfig gs.toMove true
+        have h2 : ∃ p', gs.board cfg.kingFrom = some p' ∧ p'.pieceType = PieceType.King ∧ p'.color = gs.toMove :=
+          ⟨k, h_k, h_cond.1, h_cond.2.1⟩
+        exact (king_squares_eq_of_unique gs.board gs.toMove cfg.kingFrom sq
+          (by cases gs.toMove <;> simp_all [hasValidKings]) h2 h1).symm
+      | inr h_qs =>
+        cases h_qs with
+        | inl h_qs' =>
+          unfold Rules.castleMoveIfLegal at h_some
+          split at h_some <;> try exact Option.noConfusion h_some
+          split at h_some <;> try exact Option.noConfusion h_some
+          rename_i k r h_k h_r
+          split at h_some <;> try exact Option.noConfusion h_some
+          rename_i h_cond
+          split at h_some <;> try exact Option.noConfusion h_some
+          simp only [Option.some.injEq] at h_some
+          rw [← h_some]
+          have h1 : ∃ p', gs.board sq = some p' ∧ p'.pieceType = PieceType.King ∧ p'.color = gs.toMove :=
+            ⟨p, hboard, hp, h_turn⟩
+          have cfg := Rules.castleConfig gs.toMove false
+          have h2 : ∃ p', gs.board cfg.kingFrom = some p' ∧ p'.pieceType = PieceType.King ∧ p'.color = gs.toMove :=
+            ⟨k, h_k, h_cond.1, h_cond.2.1⟩
+          exact (king_squares_eq_of_unique gs.board gs.toMove cfg.kingFrom sq
+            (by cases gs.toMove <;> simp_all [hasValidKings]) h2 h1).symm
+        | inr h_nil => simp at h_nil
+  | Queen =>
+    simp only [hp] at hmem
+    -- Queen uses slidingTargets which always sets fromSq = sq
+    have := slidingTargets_piece_fromSq gs sq p
+      [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] m hmem
+    exact this.2
+  | Rook =>
+    simp only [hp] at hmem
+    -- Rook uses slidingTargets which always sets fromSq = sq
+    have := slidingTargets_piece_fromSq gs sq p [(1, 0), (-1, 0), (0, 1), (0, -1)] m hmem
+    exact this.2
+  | Bishop =>
+    simp only [hp] at hmem
+    -- Bishop uses slidingTargets which always sets fromSq = sq
+    have := slidingTargets_piece_fromSq gs sq p [(1, 1), (-1, -1), (1, -1), (-1, 1)] m hmem
+    exact this.2
+  | Knight =>
+    simp only [hp] at hmem
+    simp only [List.mem_filterMap] at hmem
+    obtain ⟨target, _, h_some⟩ := hmem
+    split at h_some <;> try exact Option.noConfusion h_some
+    split at h_some
+    · simp only [Option.some.injEq] at h_some; rw [← h_some]
+    · simp only [Option.some.injEq] at h_some; rw [← h_some]
+  | Pawn =>
+    -- Pawn moves all set fromSq = sq
+    have := pawn_pieceTargets_piece_fromSq gs sq p m hp hmem
+    exact this.2
 
 /-- Helper lemma: Moves in allLegalMoves have their piece at the origin square.
 
@@ -99,8 +551,12 @@ axiom pieceTargets_sets_fromSq (gs : GameState) (sq : Square) (p : Piece) (m : M
     2. pieceTargets sets move.piece = p and move.fromSq = sq
     3. Therefore gs.board m.fromSq = gs.board sq = some p = some m.piece
 
+    **Hypotheses**:
+    - h_valid: At most one king per color (needed for castle uniqueness proof)
+
     **Computational verification**: All test suites pass, confirming this invariant. -/
-lemma allLegalMoves_originHasPiece (gs : GameState) (m : Move) :
+lemma allLegalMoves_originHasPiece (gs : GameState) (m : Move)
+    (h_valid : hasValidKings gs.board) :
     m ∈ Rules.allLegalMoves gs → gs.board m.fromSq = some m.piece := by
   intro hmem
   unfold Rules.allLegalMoves at hmem
@@ -117,11 +573,13 @@ lemma allLegalMoves_originHasPiece (gs : GameState) (m : Move) :
       · rename_i p hboard
         split at h_in_sq
         · simp at h_in_sq
-        · simp only [List.mem_filter] at h_in_sq
+        · rename_i hcolor
+          push_neg at hcolor
+          simp only [List.mem_filter] at h_in_sq
           obtain ⟨⟨hpin, _⟩, _⟩ := h_in_sq
           -- pieceTargets sets fromSq = sq and piece = p
-          have hfromSq : m.fromSq = sq := pieceTargets_sets_fromSq gs sq p m hboard hpin
-          have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m hboard hpin
+          have hfromSq : m.fromSq = sq := pieceTargets_sets_fromSq gs sq p m h_valid hcolor hboard hpin
+          have hpiece : m.piece = p := pieceTargets_sets_piece gs sq p m h_valid hcolor hboard hpin
           rw [hfromSq, hpiece]
           exact hboard
     | inr h_in_rest =>
@@ -342,7 +800,8 @@ axiom moveFromSanToken_finds_move (gs : GameState) (token : SanToken) (m : Move)
     ∃ m', moveFromSanToken gs token = Except.ok m' ∧ ParsingProofs.MoveEquiv m m'
 
 -- Theorem: SAN parsing preserves move structure
-theorem moveFromSAN_preserves_move_structure (gs : GameState) (san : String) (m : Move) :
+theorem moveFromSAN_preserves_move_structure (gs : GameState) (san : String) (m : Move)
+    (h_valid : hasValidKings gs.board) :
     moveFromSAN gs san = Except.ok m →
     (m.piece.color = gs.toMove ∧
      gs.board m.fromSq = some m.piece ∧
@@ -351,8 +810,8 @@ theorem moveFromSAN_preserves_move_structure (gs : GameState) (san : String) (m 
   -- moveFromSAN only returns moves from allLegalMoves, so we extract membership
   have hmem : m ∈ Rules.allLegalMoves gs := moveFromSAN_returns_legal gs san m hparse
   -- Use the helper lemmas
-  exact ⟨allLegalMoves_turnMatches gs m hmem,
-         allLegalMoves_originHasPiece gs m hmem,
+  exact ⟨allLegalMoves_turnMatches gs m h_valid hmem,
+         allLegalMoves_originHasPiece gs m h_valid hmem,
          allLegalMoves_squaresDiffer gs m hmem⟩
 
 /-- Helper: moveFromSAN only returns moves that are in allLegalMoves.
