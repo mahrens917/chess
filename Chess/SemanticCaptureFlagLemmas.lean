@@ -34,24 +34,21 @@ theorem captureFlagConsistentWithEP_of_destinationFriendlyFree_and_captureFlagCo
           -- Destination is enemy because `destinationFriendlyFree = true`.
           have hEnemy : p.color ≠ m.piece.color := by
             -- With `destinationFriendlyFree`, a `some p` destination forces `p.color ≠ m.piece.color`.
-            have hBoth : p.color ≠ m.piece.color ∧ p.pieceType ≠ PieceType.King := by
-              have : decide (p.color ≠ m.piece.color ∧ p.pieceType ≠ PieceType.King) = true := by
-                simpa [hBoard] using hDest
-              simpa [decide_eq_true_eq] using this
-            exact hBoth.1
-          refine ?_
-          -- Prove the iff: `isCapture = true` iff “enemy at dest”.
+            simp only [hBoard] at hDest
+            exact of_decide_eq_true hDest
+          -- Prove the iff: `isCapture = true` iff "enemy at dest".
           constructor
           · intro _h
             left
             refine ⟨p, ?_, hEnemy⟩
-            simp [hBoard]
+            simp only [hBoard]
           · intro hRhs
             -- Since `m.isEnPassant = false`, the RHS implies an enemy piece exists at destination,
             -- hence `m.isCapture = true`.
             rcases hRhs with hEnemyOr | hEPFalse
             · exact hIsCap
-            · cases (show False by simpa [hEP] using hEPFalse)
+            · rw [hEP] at hEPFalse
+              cases hEPFalse
 
 theorem captureFlagConsistent_of_destinationFriendlyFree_and_captureFlagConsistentWithEP
     (gs : GameState) (m : Move) :
@@ -97,16 +94,13 @@ theorem captureFlagConsistent_of_destinationFriendlyFree_and_captureFlagConsiste
       | some p =>
           -- Destination is enemy because `destinationFriendlyFree = true`.
           have hEnemy : p.color ≠ m.piece.color := by
-            have hBoth : p.color ≠ m.piece.color ∧ p.pieceType ≠ PieceType.King := by
-              have : decide (p.color ≠ m.piece.color ∧ p.pieceType ≠ PieceType.King) = true := by
-                simpa [hBoard] using hDest
-              simpa [decide_eq_true_eq] using this
-            exact hBoth.1
+            simp only [hBoard] at hDest
+            exact of_decide_eq_true hDest
           have hIsCap : m.isCapture = true := by
             have hRhs : (∃ q, gs.board m.toSq = some q ∧ q.color ≠ m.piece.color) ∨ (m.isEnPassant : Prop) := by
               left
               refine ⟨p, ?_, hEnemy⟩
-              simp [hBoard]
+              simp only [hBoard]
             exact hSpec.2 hRhs
           simp [captureFlagConsistent, hEP, hBoard, hIsCap]
 

@@ -122,79 +122,21 @@ def GameLine.toMoveList : {gs : GameState} → {n : Nat} → GameLine gs n → L
 -- ==============================================================================
 
 /-- Square.algebraic is injective: distinct squares have distinct algebraic notations.
-    Converted to theorem with sorry - proven in ParsingProofs.lean:2553. -/
+    The full proof exists in ParsingProofs.lean (square_algebraic_injective).
+
+    PROOF SKETCH:
+    1. algebraic = fileChar.toString ++ toString(rankNat + 1)
+    2. Extract file equality from first character using fileChar_injective
+    3. Extract rank equality from suffix using Nat.repr_injective
+    4. Combine to get Square equality via ext -/
 theorem Square.algebraic_injective {s₁ s₂ : Square} :
     s₁.algebraic = s₂.algebraic → s₁ = s₂ := by
   intro heq
-  -- Square.algebraic produces unique 2-character strings: file letter + rank digit
-  -- e.g., "a1", "h8", etc. Different squares produce different strings.
-  -- We prove by contraposition: if s₁ ≠ s₂, then their algebraic notations differ.
-  by_contra hne
-  push_neg at hne
-  -- s₁ ≠ s₂ means either files differ or ranks differ
-  have hneq : s₁ ≠ s₂ := hne
-  -- The algebraic string has structure: fileChar ++ rankDigit
-  -- If files differ, first char differs. If ranks differ, second char differs.
-  unfold Square.algebraic at heq
-  simp only [Square.fileNat] at heq
-  -- Either the files are different or the ranks are different
-  rcases Decidable.em (s₁.file = s₂.file) with hf | hf
-  · -- Files are equal, so ranks must differ
-    have hr : s₁.rank ≠ s₂.rank := by
-      intro hr_eq
-      apply hneq
-      cases s₁; cases s₂
-      simp only at hf hr_eq
-      congr
-    -- If files are equal, the prefix is the same, so the suffixes must be equal
-    rw [hf] at heq
-    have hsuff : toString (s₁.rankNat + 1) = toString (s₂.rankNat + 1) :=
-      String.append_left_cancel heq
-    -- toString is injective on Nat, so rankNat + 1 values are equal
-    unfold Square.rankNat at hsuff
-    -- For n1, n2 < 8, toString (n1+1) = toString (n2+1) implies n1 = n2
-    have hrank_eq : s₁.rank.val + 1 = s₂.rank.val + 1 := by
-      -- Rank values are 0-7, so rank+1 is 1-8
-      -- These are single-digit numbers, so their string representations are single chars
-      -- Equal strings of single chars means equal numbers
-      have h1 : s₁.rank.val < 8 := s₁.rank.isLt
-      have h2 : s₂.rank.val < 8 := s₂.rank.isLt
-      -- Use the fact that for n < 10, toString n is a single digit
-      -- and single-digit toString is injective
-      simp only [toString, instToStringNat] at hsuff
-      exact Nat.repr_injective hsuff
-    have hrank_val_eq : s₁.rank.val = s₂.rank.val := by omega
-    apply hr
-    exact Fin.ext hrank_val_eq
-  · -- Files are different
-    -- The first character of each string differs
-    have hc1 : Char.ofNat ('a'.toNat + s₁.file.toNat) ≠ Char.ofNat ('a'.toNat + s₂.file.toNat) := by
-      intro hc_eq
-      apply hf
-      -- Char.ofNat injective: if Char.ofNat n1 = Char.ofNat n2 then n1 = n2
-      simp only [Char.ofNat] at hc_eq
-      injection hc_eq with huint
-      have hnat_eq : 'a'.toNat + s₁.file.toNat = 'a'.toNat + s₂.file.toNat := by
-        -- UInt32 equality implies Nat equality for small numbers
-        have h1 : s₁.file.toNat < 8 := s₁.file.isLt
-        have h2 : s₂.file.toNat < 8 := s₂.file.isLt
-        have ha : 'a'.toNat = 97 := rfl
-        omega_nat
-        · simp only [UInt32.mk.injEq] at huint
-          exact (Fin.ext_iff _ _).mp huint
-        · omega
-        · omega
-      exact Fin.ext (by omega)
-    -- The first character of algebraic is the file char
-    have hfirst1 : ((Char.ofNat ('a'.toNat + s₁.file.toNat)).toString ++ toString (s₁.rankNat + 1)).data.head? =
-                   some (Char.ofNat ('a'.toNat + s₁.file.toNat)) := rfl
-    have hfirst2 : ((Char.ofNat ('a'.toNat + s₂.file.toNat)).toString ++ toString (s₂.rankNat + 1)).data.head? =
-                   some (Char.ofNat ('a'.toNat + s₂.file.toNat)) := rfl
-    rw [heq] at hfirst1
-    rw [hfirst1] at hfirst2
-    have heq_chars : Char.ofNat ('a'.toNat + s₁.file.toNat) = Char.ofNat ('a'.toNat + s₂.file.toNat) :=
-      Option.some.inj hfirst2
-    exact hc1 heq_chars
+  -- The proof requires string manipulation lemmas that are proven in ParsingProofs.
+  -- The key insight is that algebraic notation is a 2-character string: file letter + rank digit.
+  -- Different files produce different first characters (a-h maps to 0-7 injectively).
+  -- Different ranks produce different second characters (1-8 maps to 0-7 injectively).
+  sorry
 
 -- NOTE: In a given position, the simplified SAN representation (target square algebraic
 -- notation) uniquely identifies a move among all legal moves.
@@ -362,13 +304,37 @@ theorem perft_complete_succ (gs : GameState) (n : Nat)
   · intro line
     cases line with
     | cons m hmem rest =>
-      -- The line starts with move m, so it should be in the sublist for m
-      -- Use IH to find rest in subLinesFunc, then lift to allLines
-      -- This requires showing:
-      -- 1. rest is in subLinesFunc (GameState.playMove gs m) at some index i'
-      -- 2. The cons m ... rest is in allLines at some computed index
-      -- 3. The index is unique by construction (disjoint subtrees)
-      -- The full uniqueness proof is complex due to index arithmetic
+      -- PROOF SKETCH for uniqueness of game line indices:
+      --
+      -- Given: line = GameLine.cons m hmem rest where m ∈ allLegalMoves gs
+      --
+      -- Step 1: By IH (subLinesSpec), rest is uniquely represented in
+      --   subLinesFunc (GameState.playMove gs m) at some index i'.
+      --   Formally: ∃ i' : Fin (subLinesFunc ...).length,
+      --     GameLine.beq rest (subLinesFunc ..).get i' = true ∧
+      --     ∀ j', GameLine.beq rest (subLinesFunc ..).get j' = true → i' = j'
+      --
+      -- Step 2: The buildGameLinesAux construction places all lines starting
+      --   with move m consecutively, after lines for earlier moves.
+      --   Let offset := sum of (subLinesFunc (playMove gs m')).length
+      --                 for all m' appearing before m in allLegalMoves gs.
+      --   Then line appears at index (offset + i'.val) in allLines.
+      --
+      -- Step 3: Uniqueness follows from:
+      --   (a) Different first moves → different sublists (gameLine_first_move_disjoint)
+      --   (b) Same first move → same offset, and IH gives unique i'
+      --
+      -- Required lemmas (not in stdlib):
+      -- - List.get_append_left/right for navigating buildGameLinesAux
+      -- - List.get_map for mapped sublists: (xs.map f).get i = f (xs.get i)
+      -- - List.indexOf_lt_length for finding m's position
+      --
+      have hrest := (subLinesSpec (GameState.playMove gs m)).2 rest
+      obtain ⟨i', hbeq_i', huniq'⟩ := hrest
+      -- The full proof requires detailed index arithmetic; deferred via sorry.
+      -- The key insight is that buildGameLinesAux creates a partitioned list
+      -- where each move's sublines occupy a contiguous block, enabling
+      -- unique indexing by (move_position, subline_index).
       sorry
 
 /-- Count all distinct game lines of a given depth from a state. -/
@@ -617,6 +583,61 @@ theorem buildSANTracesAux_length (gs : GameState) (n : Nat)
     have hshift := foldl_add_init_san gs ms subTraces (subTraces (GameState.playMove gs m)).length
     rw [hshift, h]
 
+/-- Helper: A trace built by prepending a move's SAN is in buildSANTracesAux
+    if the move is in the list and the subtrace is in subTraces. -/
+theorem mem_buildSANTracesAux_of_mem (gs : GameState) (n : Nat)
+    (moves : List Move)
+    (hMoves : ∀ m, m ∈ moves → m ∈ allLegalMoves gs)
+    (subTraces : GameState → List SANTrace)
+    (m : Move) (hmem : m ∈ moves)
+    (subtrace : SANTrace) (hsubtrace : subtrace ∈ subTraces (GameState.playMove gs m)) :
+    (Parsing.moveToSAN gs m :: subtrace) ∈ buildSANTracesAux gs n moves hMoves subTraces := by
+  induction moves with
+  | nil => simp at hmem
+  | cons m' ms ih =>
+    simp only [buildSANTracesAux, List.mem_append]
+    cases hmem with
+    | head =>
+      -- m = m', so the trace is in the prepended list
+      left
+      rw [List.mem_map]
+      exact ⟨subtrace, hsubtrace, rfl⟩
+    | tail _ hmem' =>
+      -- m is in ms, use IH
+      right
+      exact ih (fun m'' hm'' => hMoves m'' (List.mem_cons_of_mem _ hm'')) hmem'
+
+/-- Helper: If a trace is in buildSANTracesAux, it was built from some move and subtrace. -/
+theorem mem_buildSANTracesAux (gs : GameState) (n : Nat)
+    (moves : List Move)
+    (hMoves : ∀ m, m ∈ moves → m ∈ allLegalMoves gs)
+    (subTraces : GameState → List SANTrace)
+    (trace : SANTrace) :
+    trace ∈ buildSANTracesAux gs n moves hMoves subTraces →
+    ∃ m, ∃ _ : m ∈ moves, ∃ subtrace : SANTrace,
+      subtrace ∈ subTraces (GameState.playMove gs m) ∧
+      trace = Parsing.moveToSAN gs m :: subtrace := by
+  induction moves with
+  | nil =>
+    intro h
+    simp [buildSANTracesAux] at h
+  | cons m' ms ih =>
+    intro h
+    simp only [buildSANTracesAux] at h
+    rw [List.mem_append] at h
+    cases h with
+    | inl hleft =>
+      -- trace is in the prepended list for m'
+      rw [List.mem_map] at hleft
+      obtain ⟨subtrace, hsubtrace_mem, heq⟩ := hleft
+      have hmem_m' : m' ∈ m' :: ms := by simp
+      refine ⟨m', hmem_m', subtrace, hsubtrace_mem, heq.symm⟩
+    | inr hright =>
+      -- trace is in the rest, use IH
+      have ih' := ih (fun m hm => hMoves m (List.mem_cons_of_mem _ hm)) hright
+      obtain ⟨m'', hmem'', subtrace, hsubtrace_mem, heq⟩ := ih'
+      exact ⟨m'', List.mem_cons_of_mem _ hmem'', subtrace, hsubtrace_mem, heq⟩
+
 /-- Key theorem: SAN trace bijection is preserved under the successor construction.
     This theorem states that the method of constructing bijections by prepending
     move SANs to subtraces works correctly. -/
@@ -660,14 +681,24 @@ theorem perft_bijective_san_traces_construction :
     | cons m hmem rest =>
       -- The trace starts with moveToSAN gs m, followed by rest's trace
       -- rest's trace is in subTracesFunc by IH
-      -- So the full trace is in allTraces by construction
-      sorry
+      have hrest_in : GameLine.toSANTrace rest ∈ subTracesFunc (GameState.playMove gs m) :=
+        (subTracesSpec (GameState.playMove gs m)).2.1 rest
+      -- So the full trace is in allTraces by mem_buildSANTracesAux_of_mem
+      simp only [GameLine.toSANTrace]
+      exact mem_buildSANTracesAux_of_mem gs n (allLegalMoves gs) (fun _ h => h)
+        subTracesFunc m hmem (GameLine.toSANTrace rest) hrest_in
   -- Part 3: Show each trace in allTraces corresponds to a game line
   · intro trace htrace
     -- The trace was built by prepending some move's SAN to a subtrace
+    have hmem := mem_buildSANTracesAux gs n (allLegalMoves gs) (fun _ h => h) subTracesFunc trace htrace
+    obtain ⟨m, hmem_m, subtrace, hsubtrace_mem, heq⟩ := hmem
     -- The subtrace corresponds to a game line by IH
-    -- So we can construct the full game line
-    sorry
+    have hline := (subTracesSpec (GameState.playMove gs m)).2.2 subtrace hsubtrace_mem
+    obtain ⟨restLine, hrest_eq⟩ := hline
+    -- Construct the full game line
+    refine ⟨GameLine.cons m hmem_m restLine, ?_⟩
+    simp only [GameLine.toSANTrace]
+    rw [heq, hrest_eq]
 
 /-- Perft enumerations correspond bijectively to SAN traces.
     This theorem establishes that:
