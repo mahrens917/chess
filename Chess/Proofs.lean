@@ -1,0 +1,81 @@
+import Chess.ParsingProofs
+import Chess.Parsing_SAN_Proofs
+import Chess.PerftProofs
+import Chess.DeadPositionProofs
+import Chess.KkDeadPositionProofs
+import Chess.KMinorBoard
+import Chess.KMinorMoveLemmas
+import Chess.KMinorUpdateLemmas
+import Chess.KMinorTransitionLemmas
+import Chess.KMinorSourceLemmas
+import Chess.KMinorCaptureLemmas
+import Chess.KMinorPreservationLemmas
+import Chess.KMinorDeadPositionInvariants
+import Chess.KMinorSpecificEndgameInvariants
+import Chess.Completeness
+import Chess.PathValidationProofs
+import Chess.ParsingRoundtripProofs
+import Chess.ParsingFieldRoundtripProofs
+import Chess.ParsingSANRoundtripProofs
+import Chess.ParsingSANFixtureProofs
+import Chess.ParsingPlacementFixtureProofs
+import Chess.ParsingPlacementRoundtripProofs
+import Chess.ParsingCharRoundtripProofs
+import Chess.ParsingPlacementNoSlashProofs
+import Chess.ParsingPlacementRankNoSlashProofs
+import Chess.ParsingPlacementRankParsingLemmas
+import Chess.ParsingPlacementRankStepLemmas
+import Chess.ParsingPlacementGeneralRoundtripProofs
+import Chess.ParsingFENGeneralRoundtripProofs
+import Chess.BoardRoundtripProofs
+import Chess.RulesComplete
+import Chess.AttackSpec
+import Chess.EndConditionsSpec
+import Chess.DrawSpec
+import Chess.HistorySpec
+import Chess.MaterialSpec
+import Chess.SemanticGeometryLemmas
+import Chess.SemanticSlidingGeometryLemmas
+import Chess.SemanticSlidingPathClearLemmas
+import Chess.SemanticSlidingRespectsGeometryLemmas
+import Chess.SemanticPawnLemmas
+import Chess.SemanticPawnTargetsGeometryLemmas
+import Chess.SemanticRespectsGeometryLemmas
+import Chess.SemanticMoveFlagLemmas
+import Chess.SemanticCaptureFlagLemmas
+import Chess.SemanticNonCastleRookFieldLemmas
+import Chess.SemanticCastlingLemmas
+import Chess.SemanticPromotionLemmas
+import Chess.SemanticPromotionSoundnessLemmas
+import Chess.SemanticBasicLegalLemmas
+import Chess.SemanticPieceTargetsCompletenessLemmas
+import Chess.SemanticPawnPieceTargetsCompletenessLemmas
+import Chess.SemanticCastlingPieceTargetsCompletenessLemmas
+import Chess.SemanticPinFilterLemmas
+import Chess.SlidingTargetsCompletenessHelpers
+import Chess.SlidingTargetsDeltaLemmas
+import Chess.SemanticFideLegalSoundness
+import Chess.SemanticFideLegalEquivalence
+import Chess.SemanticFideLegalEquivalenceReachable
+import Chess.StateInvariants
+import Chess.Analysis.Baseline
+import Chess.Analysis.MinimaxSpec
+import Chess.Analysis.Equivalence
+import Chess.Analysis.AlphaBeta
+import Chess.Analysis.Bounds
+import Chess.Analysis.AlphaBetaDepth1Proofs
+import Chess.Analysis.AlphaBetaDepth2Proofs
+import Chess.Analysis.MinimaxBounds
+import Chess.Analysis.Proofs
+
+namespace Chess
+
+/-!
+`Chess.Proofs` is an umbrella module that imports all proof layers (including
+currently‑axiomatized stubs). Importing this from a root ensures Lake compiles
+the entire proof surface so unfinished work can’t hide off‑graph.
+
+Archived in‑progress proofs live under `trash/`.
+-/
+
+end Chess
