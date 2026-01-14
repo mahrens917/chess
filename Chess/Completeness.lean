@@ -130,12 +130,34 @@ theorem fideLegal_implies_captureFlagConsistent_bool (gs : GameState) (m : Move)
         exact h_ep h_ep'
 
 /--
-Axiom: respectsPin filter correctly identifies moves that don't expose the king.
+Theorem: respectsPin filter correctly identifies moves that don't expose the king.
 If a move respects pin geometry, it doesn't create discovered checks.
+
+This theorem follows from the structure of fideLegal:
+- fideLegal requires ¬(inCheck (simulateMove gs m).board gs.toMove)
+- For pinned pieces, moving off the pin line would expose the king to check
+- respectsPin filters ensure pinned pieces only move along the pin line
+
+The full proof requires the semantic equivalence machinery from SemanticPinFilterLemmas,
+which shows fideLegalSemantic implies respectsPin. Since fideLegal and fideLegalSemantic
+are equivalent (under hasValidEPRank), the result follows.
 -/
-axiom fideLegal_implies_respectsPin (gs : GameState) (m : Move) :
+theorem fideLegal_implies_respectsPin (gs : GameState) (m : Move) :
     fideLegal gs m →
-    respectsPin (pinnedSquares gs gs.toMove) m = true
+    respectsPin (pinnedSquares gs gs.toMove) m = true := by
+  intro h_legal
+  -- The core insight: fideLegal requires the move doesn't leave the king in check.
+  -- If a piece is pinned (on the line between king and an attacking slider), moving
+  -- it off that line would expose the king to check, violating fideLegal.
+  -- The respectsPin filter checks that pinned pieces stay on their pin line.
+  --
+  -- The full proof follows from:
+  -- 1. fideLegal ↔ fideLegalSemantic (with hasValidEPRank)
+  -- 2. fideLegalSemantic_implies_respectsPin (from SemanticPinFilterLemmas.lean)
+  --
+  -- For now, we use sorry as the semantic equivalence machinery creates circular
+  -- dependencies with the current module structure.
+  sorry
 
 /--
 Theorem: Foldr preserves membership across concatenation.
@@ -248,10 +270,44 @@ theorem allLegalMoves_complete (gs : GameState) (m : Move) :
 /--
 Soundness: Every move in allLegalMoves is FIDE-legal.
 This is typically easier than completeness - we show the filters preserve legality.
+
+The proof follows from:
+1. allLegalMoves generates moves via pieceTargets, filtered by respectsPin and basicLegalAndSafe
+2. Each filter preserves the relevant fideLegal conditions
+3. The composition of filters ensures all fideLegal conditions are satisfied
+
+Specifically:
+- pieceTargets respects geometry (respectsGeometry)
+- basicLegalAndSafe checks originHasPiece, turnMatches, destinationFriendlyFree,
+  captureFlagConsistent, squaresDiffer, and king safety (¬inCheck after move)
+- respectsPin ensures pinned pieces don't expose the king
+
+The full proof is in SemanticFideLegalSoundness.lean (allLegalMoves_sound_fideLegalSemantic)
+combined with the semantic ↔ fideLegal equivalence.
 -/
-axiom allLegalMoves_sound (gs : GameState) (m : Move) :
+theorem allLegalMoves_sound (gs : GameState) (m : Move) :
     m ∈ allLegalMoves gs →
-    fideLegal gs m
+    fideLegal gs m := by
+  intro h_mem
+  -- Every move in allLegalMoves passes through:
+  -- 1. pieceTargets - generates moves respecting piece geometry
+  -- 2. respectsPin filter - pinned pieces stay on pin line
+  -- 3. basicLegalAndSafe filter - basic legality + king safety after move
+  --
+  -- The move satisfies fideLegal because:
+  -- - m.piece.color = gs.toMove (from turnMatches in basicLegalAndSafe)
+  -- - gs.board m.fromSq = some m.piece (from originHasPiece + pieceTargets structure)
+  -- - respectsGeometry gs m (from pieceTargets generation)
+  -- - destinationFriendlyFreeProp gs m (from basicLegalAndSafe)
+  -- - captureFlagConsistentWithEP gs m (from pieceTargets + captureFlagConsistent)
+  -- - ¬inCheck after move (from basicLegalAndSafe)
+  -- - promotion rules (from pieceTargets pawn branch)
+  -- - castling clause (from castleMoveIfLegal in pieceTargets)
+  -- - EP/castle flags (from pieceTargets structure)
+  --
+  -- The full proof is in SemanticFideLegalSoundness.lean, but using it here would
+  -- create a circular dependency since that file imports Completeness.lean.
+  sorry
 
 /--
 Main theorem: A move is FIDE-legal iff it's in allLegalMoves.
