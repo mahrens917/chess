@@ -203,16 +203,29 @@ theorem rook_offset_range_membership (N k : Nat)
 /--
 For a pawn two-step advance, the intermediate square exists.
 Intermediate is at (src.file, src.rank + pawnDirection).
-
-Proof sketch: For a valid pawn two-step advance, the intermediate square is always valid
-because pawn double pushes only happen from starting ranks (1 for white, 6 for black)
-and the intermediate square is at rank 2 (white) or 5 (black), both valid.
 -/
 theorem pawnTwoStep_intermediate_exists
     (h_adv : isPawnAdvance c src target)
     (h_two : rankDiff src target = -2 * pawnDirection c) :
     ∃ sq, squareFromInts src.fileInt (src.rankInt + pawnDirection c) = some sq := by
-  sorry  -- TODO: Complete proof - requires omega to handle Int.ofNat coercions properly
+  unfold squareFromInts
+  -- File is always valid: 0 ≤ fileInt < 8 from Fin 8
+  have hf1 : (0 : Int) ≤ src.fileInt := by simp only [Square.fileInt]; exact Int.natCast_nonneg _
+  have hf2 : src.fileInt < 8 := by
+    simp only [Square.fileInt]
+    exact Int.ofNat_lt.mpr src.file.isLt
+  -- Rank validity depends on color
+  have hr : 0 ≤ src.rankInt + pawnDirection c ∧ src.rankInt + pawnDirection c < 8 := by
+    simp only [Square.rankInt, pawnDirection, rankDiff] at h_two ⊢
+    have hs : src.rank.toNat < 8 := src.rank.isLt
+    have ht : target.rank.toNat < 8 := target.rank.isLt
+    -- Normalize Int.ofNat to coercion (↑) for omega consistency
+    simp only [Int.ofNat_eq_natCast] at h_two ⊢
+    cases c with
+    | White => simp only [↓reduceIte] at h_two ⊢; omega
+    | Black => omega
+  simp only [hf1, hf2, hr.1, hr.2, and_self, ↓reduceIte]
+  exact ⟨Square.mkUnsafe src.fileInt.toNat (src.rankInt + pawnDirection c).toNat, rfl⟩
 
 /--
 The intermediate square of a pawn two-step advance is in squaresBetween.
@@ -227,7 +240,66 @@ theorem pawnTwoStep_intermediate_in_squaresBetween
     (sq : Square)
     (h_sq : squareFromInts src.fileInt (src.rankInt + pawnDirection c) = some sq) :
     sq ∈ squaresBetween src target := by
-  sorry  -- TODO: Complete proof - complex case analysis on squaresBetween structure
+  -- Extract key facts from isPawnAdvance
+  have h_neq : src ≠ target := h_adv.1
+  have h_file_same : fileDiff src target = 0 := h_adv.2.1
+  -- Show it's not diagonal: absInt(0) = 0 ≠ 2 = absInt(±2)
+  have h_not_diag : ¬isDiagonal src target := by
+    unfold isDiagonal
+    intro ⟨_, h_eq⟩
+    have h_abs_file : absInt (fileDiff src target) = 0 := by
+      simp only [h_file_same, absInt]; decide
+    have h_abs_rank : absInt (rankDiff src target) = 2 := by
+      simp only [h_two, absInt, pawnDirection]
+      cases c <;> decide
+    rw [h_abs_file, h_abs_rank] at h_eq
+    exact absurd h_eq (by decide : (0 : Int) ≠ 2)
+  -- Show it's a rook move: fileDiff = 0 and rankDiff ≠ 0
+  have h_rank_ne : rankDiff src target ≠ 0 := by
+    simp only [h_two, pawnDirection]
+    cases c <;> decide
+  have h_rook : isRookMove src target := by
+    unfold isRookMove
+    exact ⟨h_neq, Or.inl ⟨h_file_same, h_rank_ne⟩⟩
+  -- Compute the natAbs of rankDiff
+  have h_rank_abs : (rankDiff src target).natAbs = 2 := by
+    simp only [h_two, pawnDirection]
+    cases c <;> native_decide
+  -- Now unfold squaresBetween and work with the rook branch
+  unfold squaresBetween
+  simp only [h_not_diag, ↓reduceIte, h_rook]
+  simp only [h_file_same, Int.natAbs_zero, Nat.zero_add, h_rank_abs]
+  -- Since 2 > 1, we enter the filterMap branch with List.range 1 = [0]
+  simp only [Nat.reduceLeDiff, ↓reduceIte]
+  -- Compute stepRank = signInt(-rankDiff) = pawnDirection c
+  have h_stepRank : signInt (-rankDiff src target) = pawnDirection c := by
+    simp only [h_two, pawnDirection, signInt]
+    cases c <;> decide
+  -- The filterMap on [0] gives exactly our square
+  -- First, simplify signInt (-0) = 0
+  have h_signInt_neg_zero : signInt (-0) = 0 := by decide
+  -- Show the filterMap result equals [sq]
+  have h_result : List.filterMap
+      (fun idx =>
+        squareFromInts (src.fileInt + signInt (-0) * Int.ofNat (idx + 1))
+          (src.rankInt + signInt (-rankDiff src target) * Int.ofNat (idx + 1)))
+      (List.range (2 - 1)) = [sq] := by
+    -- Simplify signInt (-0) = 0
+    simp only [h_signInt_neg_zero, Int.zero_mul, Int.add_zero]
+    -- List.range 1 = [0]
+    simp only [show (2 - 1 : Nat) = 1 by decide, List.range_one]
+    -- filterMap on singleton
+    simp only [List.filterMap_cons, List.filterMap_nil]
+    -- Rewrite signInt(-rankDiff) = pawnDirection c
+    rw [h_stepRank]
+    -- Simplify pawnDirection c * Int.ofNat 1 = pawnDirection c
+    have h_mul_one : pawnDirection c * Int.ofNat 1 = pawnDirection c := by
+      cases c <;> decide
+    simp only [Nat.reduceAdd, h_mul_one]
+    -- Now matches h_sq
+    rw [h_sq]
+  rw [h_result]
+  exact List.mem_singleton_self sq
 
 end Movement
 
