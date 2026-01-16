@@ -47,8 +47,8 @@ theorem captureFlagConsistentWithEP_of_destinationFriendlyFree_and_captureFlagCo
             -- hence `m.isCapture = true`.
             rcases hRhs with hEnemyOr | hEPFalse
             · exact hIsCap
-            · rw [hEP] at hEPFalse
-              cases hEPFalse
+            · -- hEPFalse : m.isEnPassant = true (the Prop coercion), but hEP : m.isEnPassant = false
+              simp only [hEP, Bool.false_eq_true] at hEPFalse
 
 theorem captureFlagConsistent_of_destinationFriendlyFree_and_captureFlagConsistentWithEP
     (gs : GameState) (m : Move) :

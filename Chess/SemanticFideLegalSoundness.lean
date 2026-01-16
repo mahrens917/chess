@@ -1,4 +1,4 @@
-import Chess.Completeness
+import Chess.CoreSoundnessLemmas
 import Chess.SemanticCastlingLemmas
 import Chess.SemanticMoveFlagLemmas
 import Chess.SemanticNonCastleRookFieldLemmas

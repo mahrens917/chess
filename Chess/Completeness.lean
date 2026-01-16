@@ -1,6 +1,8 @@
 import Chess.Rules
 import Chess.Spec
 import Chess.Core
+import Chess.SemanticPinFilterLemmas
+import Chess.SemanticFideLegalSoundness
 
 namespace Chess.Rules
 
@@ -146,18 +148,9 @@ theorem fideLegal_implies_respectsPin (gs : GameState) (m : Move) :
     fideLegal gs m →
     respectsPin (pinnedSquares gs gs.toMove) m = true := by
   intro h_legal
-  -- The core insight: fideLegal requires the move doesn't leave the king in check.
-  -- If a piece is pinned (on the line between king and an attacking slider), moving
-  -- it off that line would expose the king to check, violating fideLegal.
-  -- The respectsPin filter checks that pinned pieces stay on their pin line.
-  --
-  -- The full proof follows from:
-  -- 1. fideLegal ↔ fideLegalSemantic (with hasValidEPRank)
-  -- 2. fideLegalSemantic_implies_respectsPin (from SemanticPinFilterLemmas.lean)
-  --
-  -- For now, we use sorry as the semantic equivalence machinery creates circular
-  -- dependencies with the current module structure.
-  sorry
+  -- fideLegalSemantic is definitionally equal to fideLegal (via abbrev in Spec.lean)
+  -- so we can directly use fideLegalSemantic_implies_respectsPin from SemanticPinFilterLemmas
+  exact fideLegalSemantic_implies_respectsPin gs m h_legal
 
 /--
 Theorem: Foldr preserves membership across concatenation.
@@ -284,40 +277,38 @@ Specifically:
 
 The full proof is in SemanticFideLegalSoundness.lean (allLegalMoves_sound_fideLegalSemantic)
 combined with the semantic ↔ fideLegal equivalence.
+
+NOTE: This theorem requires `hasValidEPRank gs` because the proof relies on the fact that
+en passant targets are only on ranks 3 or 6 (not promotion ranks 1 or 8). This invariant
+holds for all game states reachable from the standard starting position.
+
+For game states that are reachable from standard play, use the variant
+`allLegalMoves_sound_fideLegalSemantic_of_reachable` from StateInvariants.lean which
+discharges the `hasValidEPRank` assumption automatically.
 -/
-theorem allLegalMoves_sound (gs : GameState) (m : Move) :
+theorem allLegalMoves_sound (gs : GameState) (m : Move)
+    (h_valid_ep : hasValidEPRank gs) :
     m ∈ allLegalMoves gs →
     fideLegal gs m := by
   intro h_mem
-  -- Every move in allLegalMoves passes through:
-  -- 1. pieceTargets - generates moves respecting piece geometry
-  -- 2. respectsPin filter - pinned pieces stay on pin line
-  -- 3. basicLegalAndSafe filter - basic legality + king safety after move
-  --
-  -- The move satisfies fideLegal because:
-  -- - m.piece.color = gs.toMove (from turnMatches in basicLegalAndSafe)
-  -- - gs.board m.fromSq = some m.piece (from originHasPiece + pieceTargets structure)
-  -- - respectsGeometry gs m (from pieceTargets generation)
-  -- - destinationFriendlyFreeProp gs m (from basicLegalAndSafe)
-  -- - captureFlagConsistentWithEP gs m (from pieceTargets + captureFlagConsistent)
-  -- - ¬inCheck after move (from basicLegalAndSafe)
-  -- - promotion rules (from pieceTargets pawn branch)
-  -- - castling clause (from castleMoveIfLegal in pieceTargets)
-  -- - EP/castle flags (from pieceTargets structure)
-  --
-  -- The full proof is in SemanticFideLegalSoundness.lean, but using it here would
-  -- create a circular dependency since that file imports Completeness.lean.
-  sorry
+  -- fideLegalSemantic is definitionally equal to fideLegal (via abbrev in Spec.lean).
+  -- Use the existing proof from SemanticFideLegalSoundness.lean.
+  exact allLegalMoves_sound_fideLegalSemantic gs m h_valid_ep h_mem
 
 /--
 Main theorem: A move is FIDE-legal iff it's in allLegalMoves.
 This establishes the formal equivalence between specification and implementation.
+
+NOTE: The soundness direction requires `hasValidEPRank gs` because of the en passant
+promotion rank constraint. For game states reachable from standard play, this
+invariant always holds (see `reachableFromStandard_hasValidEPRank` in StateInvariants.lean).
 -/
-theorem legalMove_iff_in_allLegalMoves (gs : GameState) (m : Move) :
+theorem legalMove_iff_in_allLegalMoves (gs : GameState) (m : Move)
+    (h_valid_ep : hasValidEPRank gs) :
     legalMove gs m ↔ m ∈ allLegalMoves gs := by
   unfold legalMove
   constructor
   · exact allLegalMoves_complete gs m
-  · exact allLegalMoves_sound gs m
+  · exact allLegalMoves_sound gs m h_valid_ep
 
 end Chess.Rules
