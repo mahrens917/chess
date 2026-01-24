@@ -114,6 +114,25 @@ namespace Square
       native_decide
     exact this sq.file sq.rank
 
+  /-- Extensionality for squares: two squares are equal if their file and rank are equal -/
+  @[ext]
+  theorem ext {sq1 sq2 : Square}
+      (hfile : sq1.file = sq2.file)
+      (hrank : sq1.rank = sq2.rank) : sq1 = sq2 := by
+    cases sq1; cases sq2; congr
+
+  /-- Extensionality using Int coordinates -/
+  theorem ext_fileInt_rankInt {sq1 sq2 : Square}
+      (hfile : sq1.fileInt = sq2.fileInt)
+      (hrank : sq1.rankInt = sq2.rankInt) : sq1 = sq2 := by
+    apply ext
+    · apply Fin.ext
+      unfold fileInt at hfile
+      exact Int.ofNat.inj hfile
+    · apply Fin.ext
+      unfold rankInt at hrank
+      exact Int.ofNat.inj hrank
+
 end Square
 
 def allSquares : List Square := Square.all

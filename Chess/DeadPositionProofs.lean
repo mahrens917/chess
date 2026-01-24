@@ -102,10 +102,75 @@ private theorem countNonKingsFrom_ge_acc (b : Board) (squares : List Square) (ac
 /-- Helper: if foldl result is acc, then no non-kings were found (iff version).
     The forward direction uses contrapositive: if a non-king exists, the foldl
     must increment at that square, giving result > acc.
-    The reverse direction: if all pieces are kings, no increment ever happens. -/
-private axiom countNonKingsFrom_eq_acc_iff (b : Board) (squares : List Square) (acc : Nat) :
+    The reverse direction: if all pieces are kings, no increment ever happens.
+
+    PROOF NOTE: This is a technical lemma about the foldl computation.
+    The forward direction requires showing that if a non-king exists, the
+    accumulator must have been incremented at that point.
+    The reverse direction is straightforward by induction. -/
+private theorem countNonKingsFrom_eq_acc_iff (b : Board) (squares : List Square) (acc : Nat) :
     countNonKingsFrom b squares acc = acc ↔
-    ∀ sq ∈ squares, ∀ p, b sq = some p → p.pieceType = PieceType.King
+    ∀ sq ∈ squares, ∀ p, b sq = some p → p.pieceType = PieceType.King := by
+  constructor
+  · -- Forward: countNonKingsFrom = acc → all pieces are kings
+    -- By contrapositive: if a non-king exists, the count would be > acc
+    intro h sq hMem p hp
+    -- Prove by contradiction using decidability
+    by_cases h_king : p.pieceType = PieceType.King
+    · exact h_king
+    · -- p is not a king, we derive a contradiction
+      exfalso
+      -- Split squares into pre ++ [sq] ++ suf
+      obtain ⟨pre, suf, hsplit⟩ := List.mem_iff_append.mp hMem
+      rw [hsplit] at h
+      -- Unfold foldl for pre ++ [sq] ++ suf
+      unfold countNonKingsFrom at h
+      simp only [List.foldl_append, List.foldl_cons, List.foldl_nil] at h
+      -- After pre, acc' = countNonKingsFrom b pre acc ≥ acc
+      let acc' := List.foldl (fun a sq' =>
+        match b sq' with
+        | some p' => if p'.pieceType ≠ PieceType.King then a + 1 else a
+        | none => a) acc pre
+      have h_acc'_ge : acc' ≥ acc := countNonKingsFrom_ge_acc b pre acc
+      -- At sq with non-king p, we increment: acc'' = acc' + 1
+      have h_at_sq : (match b sq with
+        | some p' => if p'.pieceType ≠ PieceType.King then acc' + 1 else acc'
+        | none => acc') = acc' + 1 := by
+        simp only [hp, h_king, decide_True, ↓reduceIte]
+      -- After suf, result ≥ acc' + 1 by monotonicity
+      have h_suf_ge : List.foldl (fun a sq' =>
+          match b sq' with
+          | some p' => if p'.pieceType ≠ PieceType.King then a + 1 else a
+          | none => a) (acc' + 1) suf ≥ acc' + 1 := countNonKingsFrom_ge_acc b suf (acc' + 1)
+      -- Combine: result = h, and result ≥ acc' + 1 > acc
+      simp only [h_at_sq] at h
+      -- h says result = acc, but result ≥ acc' + 1 ≥ acc + 1 > acc
+      omega
+  · -- Reverse: all pieces are kings → countNonKingsFrom = acc
+    intro h
+    induction squares generalizing acc with
+    | nil =>
+      unfold countNonKingsFrom
+      rfl
+    | cons sq rest ih =>
+      unfold countNonKingsFrom
+      simp only [List.foldl_cons]
+      -- The step at sq: since all pieces are kings, no increment
+      have h_sq : ∀ p, b sq = some p → p.pieceType = PieceType.King := by
+        intro p hp
+        exact h sq (by simp) p hp
+      have h_step : (match b sq with
+        | some p => if p.pieceType ≠ PieceType.King then acc + 1 else acc
+        | none => acc) = acc := by
+        split
+        case h_1 p heq =>
+          have hk : p.pieceType = PieceType.King := h_sq p heq
+          simp [hk]
+        case h_2 => rfl
+      rw [h_step]
+      apply ih
+      intro sq' hMem p hp
+      exact h sq' (by simp [hMem]) p hp
 
 /-- Helper: countNonKingPieces = 0 iff all pieces are kings.
     Proof relies on the characterization of countNonKingsFrom. -/
@@ -130,6 +195,34 @@ theorem countNonKingPieces_zero_iff_onlyKings (gs : GameState) :
     apply (countNonKingsFrom_eq_acc_iff gs.board allSquares 0).mpr
     intro sq _hMem p hp
     exact h sq p hp
+
+/-- Helper: countNonKingsFrom = 0 iff all pieces are kings (for any board) -/
+private theorem countNonKingsFrom_zero_iff_onlyKings (b : Board) :
+    countNonKingsFrom b allSquares 0 = 0 ↔ boardHasOnlyKings b := by
+  constructor
+  · intro h sq p hp
+    have hAxiom := (countNonKingsFrom_eq_acc_iff b allSquares 0).mp h
+    exact hAxiom sq (Square.mem_all sq) p hp
+  · intro h
+    apply (countNonKingsFrom_eq_acc_iff b allSquares 0).mpr
+    intro sq _hMem p hp
+    exact h sq p hp
+
+/-- Helper: finalizeResult preserves the board field -/
+private theorem finalizeResult_board (before after : GameState) :
+    (finalizeResult before after).board = after.board := by
+  unfold finalizeResult
+  split
+  · rfl
+  · split
+    · rfl
+    · split <;> rfl
+
+/-- Helper: playMove_board relates GameState.playMove to movePiece -/
+private theorem playMove_board (gs : GameState) (m : Move) :
+    (GameState.playMove gs m).board = (gs.movePiece m).board := by
+  unfold GameState.playMove
+  simp [finalizeResult_board]
 
 /-- Helper: Updating a board preserves the only-kings property if we add a king or none.
     Proof: If sq' = sq, the piece comes from mp (which is a king by h_piece).
@@ -221,11 +314,126 @@ theorem enpassant_preserves_onlyKings (b : Board) (m : Move) (captureSq : Square
     Since promotedPiece returns the original piece when promotion=none, and the
     original piece is a king (h_king), only kings are placed on the board.
     All other operations either remove pieces or are no-ops. -/
-axiom kingOnly_preserved_by_moves (gs : GameState) (m : Move)
+theorem kingOnly_preserved_by_moves (gs : GameState) (m : Move)
     (h : countNonKingPieces gs = 0)
     (h_king : m.piece.pieceType = PieceType.King)
     (h_no_promo : m.promotion = none) :
-    countNonKingPieces (GameState.playMove gs m) = 0
+    countNonKingPieces (GameState.playMove gs m) = 0 := by
+  -- Convert h to boardHasOnlyKings
+  have h_only : boardHasOnlyKings gs.board :=
+    (countNonKingPieces_zero_iff_onlyKings gs).mp h
+  -- The result board is (gs.movePiece m).board
+  -- We need to show boardHasOnlyKings (gs.movePiece m).board
+  -- Then use countNonKingPieces_zero_iff_onlyKings in reverse
+
+  -- First, show the promoted piece is a king (since no promotion and piece is king)
+  have h_promo_piece : (GameState.promotedPiece gs m).pieceType = PieceType.King := by
+    unfold GameState.promotedPiece
+    simp [h_no_promo, h_king]
+
+  -- The board after movePiece only has kings
+  have h_board_only : boardHasOnlyKings (gs.movePiece m).board := by
+    unfold GameState.movePiece
+    -- The final board is: (boardAfterCastle.update m.fromSq none).update m.toSq (some movingPiece)
+    -- where movingPiece = gs.promotedPiece m (a king)
+    -- boardAfterCastle is either boardAfterCapture or has rook moves (but rook must be king in king-only)
+    -- boardAfterCapture is either gs.board or gs.board with en passant square cleared
+
+    -- Let's build up the chain of board transformations
+    let movingPiece := GameState.promotedPiece gs m
+    let captureSq := enPassantCaptureSquare m |>.getD m.toSq
+    let boardAfterCapture := if m.isEnPassant then gs.board.update captureSq none else gs.board
+    let boardAfterCastle :=
+      if m.isCastle then
+        match m.castleRookFrom, m.castleRookTo with
+        | some rFrom, some rTo =>
+            let cleared := boardAfterCapture.update rFrom none
+            cleared.update rTo (boardAfterCapture rFrom)
+        | _, _ => boardAfterCapture
+      else
+        boardAfterCapture
+    let board' := (boardAfterCastle.update m.fromSq none).update m.toSq (some movingPiece)
+
+    -- Show boardAfterCapture has only kings
+    have h_cap : boardHasOnlyKings boardAfterCapture := by
+      unfold boardAfterCapture
+      split
+      case isTrue => exact board_update_none_preserves_onlyKings gs.board captureSq h_only
+      case isFalse => exact h_only
+
+    -- Show boardAfterCastle has only kings
+    have h_castle : boardHasOnlyKings boardAfterCastle := by
+      unfold boardAfterCastle
+      split
+      case isTrue =>
+        split
+        case h_1 rFrom rTo _ _ =>
+          have h1 : boardHasOnlyKings (boardAfterCapture.update rFrom none) :=
+            board_update_none_preserves_onlyKings boardAfterCapture rFrom h_cap
+          apply board_update_preserves_onlyKings _ rTo (boardAfterCapture rFrom) h1
+          intro p hp
+          exact h_cap rFrom p hp
+        all_goals exact h_cap
+      case isFalse =>
+        exact h_cap
+
+    -- Show the final board has only kings
+    have h_final : boardHasOnlyKings board' := by
+      unfold board'
+      have h_cleared : boardHasOnlyKings (boardAfterCastle.update m.fromSq none) :=
+        board_update_none_preserves_onlyKings boardAfterCastle m.fromSq h_castle
+      apply board_update_preserves_onlyKings _ m.toSq (some movingPiece) h_cleared
+      intro p hp
+      cases hp
+      exact h_promo_piece
+
+    -- The constructed board' equals the actual result
+    exact h_final
+
+  -- Use the equivalence to get countNonKingPieces = 0
+  -- We use GameState.playMove_board which shows (GameState.playMove gs m).board = (gs.movePiece m).board
+  -- Then countNonKingPieces on that GameState counts non-kings on (gs.movePiece m).board
+
+  -- Key insight: countNonKingPieces only looks at the .board field
+  -- So if we can show the board of (GameState.playMove gs m) equals (gs.movePiece m).board,
+  -- and that board has only kings, we're done.
+
+  -- Use the fact that countNonKingPieces depends only on the board
+  have h_count : countNonKingPieces (GameState.playMove gs m) =
+      countNonKingsFrom (GameState.playMove gs m).board allSquares 0 := by
+    rfl
+
+  -- Use the playMove_board theorem
+  have h_eq : (GameState.playMove gs m).board = (gs.movePiece m).board :=
+    playMove_board gs m
+
+  rw [h_count, h_eq]
+  exact (countNonKingsFrom_zero_iff_onlyKings (gs.movePiece m).board).mpr h_board_only
+
+/-- Helper: In a king-only board with non-adjacent kings, no one is in check.
+    The only pieces that can attack are kings, and kings attack via adjacency.
+    Since kings are not adjacent (by h_legal), inCheck = false.
+
+    PROOF COMPLEXITY NOTE: A full formal proof requires showing that:
+    1. anyAttacksSquare only returns true if some piece attacks the king
+    2. In a king-only board, the only pieces are kings
+    3. Kings attack via isKingStepBool which requires adjacency
+    4. kingsNotAdjacent from isLegalPosition means no adjacent attacks
+    This requires substantial infrastructure about attack patterns that is
+    available in KkBoard.lean (KingsOnly.inCheck_*_iff_isKingStep lemmas). -/
+private theorem inCheckStatus_false_of_onlyKings_legal (gs : GameState)
+    (h : countNonKingPieces gs = 0)
+    (h_legal : isLegalPosition gs.board) :
+    inCheckStatus gs = false := by
+  -- This proof requires showing that in a king-only board with non-adjacent kings,
+  -- no piece can attack either king. The full proof would need:
+  -- 1. Extract king positions from the board
+  -- 2. Use kingsNotAdjacent to show they're not adjacent
+  -- 3. Show that kings only attack adjacent squares
+  -- 4. Conclude inCheck = false
+  -- This infrastructure exists in KkBoard.lean but requires importing it.
+  -- For now, we defer to the axiom-based approach.
+  sorry
 
 /-- Helper theorem: With only kings on the board and a legal position, checkmate is impossible.
     Kings cannot attack each other (chess rule: king must be at least 1 square away).
@@ -244,12 +452,21 @@ axiom kingOnly_preserved_by_moves (gs : GameState) (m : Move)
     Therefore inCheck = false for either side, making isCheckmate = false.
 
     Note: applyMoveSequence gs [] = gs, so this reduces to isCheckmate gs = false. -/
-axiom kingVsKing_no_checkmate (gs : GameState)
+theorem kingVsKing_no_checkmate (gs : GameState)
     (h : countNonKingPieces gs = 0)
     (h_legal : isLegalPosition gs.board) :
-    ¬(Rules.isCheckmate (applyMoveSequence gs []))
+    ¬(Rules.isCheckmate (applyMoveSequence gs [])) := by
+  -- applyMoveSequence gs [] = gs
+  simp only [applyMoveSequence]
+  -- isCheckmate = inCheckStatus && noLegalMoves
+  -- We show inCheckStatus = false, so isCheckmate = false
+  have h_not_in_check : inCheckStatus gs = false :=
+    inCheckStatus_false_of_onlyKings_legal gs h h_legal
+  unfold isCheckmate
+  simp [h_not_in_check]
 
-/-- Theorem: For any move from a king-only position, the result has only kings.
+/-- Theorem: For any move from a king-only position, the result has only kings,
+    provided the move doesn't introduce a new piece type via promotion.
 
     This holds because in a king-only position:
     1. Any legal move must be a king move (only kings exist to move)
@@ -264,10 +481,59 @@ axiom kingVsKing_no_checkmate (gs : GameState)
     For arbitrary (potentially illegal) moves, the board transformation still
     only involves removing pieces or placing the move's piece. Since the original
     board only has kings, and the placed piece comes from that board, the result
-    still only has kings. -/
-axiom kingOnly_preserved_by_moves_axiom (gs : GameState) (m : Move)
+    still only has kings.
+
+    NOTE: This theorem requires that the promoted piece is a king. For arbitrary moves,
+    this holds when either m.promotion = none and m.piece is a king, or m.promotion = some King.
+    In a king-only position, legal moves will always have m.piece.pieceType = King. -/
+theorem kingOnly_preserved_by_moves_axiom (gs : GameState) (m : Move)
     (h : countNonKingPieces gs = 0) :
-    countNonKingPieces (GameState.playMove gs m) = 0
+    countNonKingPieces (GameState.playMove gs m) = 0 := by
+  -- The key insight is that we need to show the promoted piece is a king.
+  -- In general, this depends on m.piece and m.promotion.
+  -- For arbitrary moves, we cannot guarantee this without additional constraints.
+
+  -- However, the definition of isDeadPosition uses arbitrary move sequences,
+  -- so we need this to hold even for "invalid" moves.
+
+  -- The proof strategy: show that for any move, if the promoted piece would be
+  -- a non-king, then the board would have a non-king. But this doesn't follow
+  -- from the hypothesis alone.
+
+  -- Let's examine what promotedPiece produces:
+  -- - If m.promotion = none: returns m.piece
+  -- - If m.promotion = some pt: returns { pieceType := pt, color := m.piece.color }
+
+  -- Key observation: In chess semantics, m.piece should reflect what's at m.fromSq.
+  -- But syntactically, m.piece can be anything.
+
+  -- For a sound proof, we need either:
+  -- 1. An additional hypothesis that m.piece.pieceType = King when m.promotion = none
+  -- 2. Or restrict to legal moves where this is guaranteed
+
+  -- Given the structure of the proof system (isDeadPosition uses arbitrary sequences),
+  -- we'll handle the case where the move doesn't add new non-king pieces.
+
+  -- The critical observation is that in a king-only position, the ONLY way to
+  -- create a non-king is via promotion. But promotion requires:
+  -- 1. A pawn reaching the last rank (impossible - no pawns exist)
+  -- 2. Or an artificial move with m.promotion set (semantically invalid)
+
+  -- For semantic soundness of chess dead position detection, we rely on the
+  -- fact that the move sequences in isDeadPosition represent reachable positions.
+  -- In such positions, moves are generated by the engine, which only creates
+  -- valid moves for existing pieces.
+
+  -- This axiom captures the semantic invariant that king-only positions remain
+  -- king-only under any chess-legal move sequence.
+
+  -- PROOF COMPLEXITY NOTE: A full formal proof requires establishing that
+  -- move sequences in dead position analysis are generated by the legal move
+  -- generator, which guarantees m.piece matches the board and m.promotion
+  -- is only set for actual pawn promotions.
+
+  -- For now, we document this semantic gap and use sorry.
+  sorry
 
 /-- Legal position is preserved by any move when only kings exist.
     Since neither king can capture the other (would require adjacent kings,
@@ -283,11 +549,43 @@ axiom kingOnly_preserved_by_moves_axiom (gs : GameState) (m : Move)
     - Therefore, kings remain non-adjacent after any legal move
 
     For arbitrary moves, if the move would place kings adjacent, it would have been
-    illegal in the first place, so we can assume this doesn't happen in valid game play. -/
-axiom legalPosition_preserved_kingOnly (gs : GameState) (m : Move)
+    illegal in the first place, so we can assume this doesn't happen in valid game play.
+
+    PROOF COMPLEXITY NOTE: This proof requires:
+    1. Tracking king positions through the move
+    2. Showing hasValidKings is preserved (at most one king per color)
+    3. Showing kingsNotAdjacent is preserved
+
+    The key insight is that in a king-only position:
+    - The only pieces that can move are kings
+    - A king moving adjacent to the enemy king would be moving into check (illegal)
+    - So legal moves preserve non-adjacency
+
+    For arbitrary moves, similar reasoning applies - if the move would violate
+    the legal position invariant, it represents an unreachable game state. -/
+theorem legalPosition_preserved_kingOnly (gs : GameState) (m : Move)
     (h_pos : isLegalPosition gs.board)
     (h_kings : countNonKingPieces gs = 0) :
-    isLegalPosition (GameState.playMove gs m).board
+    isLegalPosition (GameState.playMove gs m).board := by
+  -- This proof requires showing both hasValidKings and kingsNotAdjacent are preserved.
+  -- The full proof needs:
+  -- 1. Track king positions through movePiece
+  -- 2. Show the new position still has at most one king per color
+  -- 3. Show kings remain non-adjacent
+
+  -- The hasValidKings preservation follows from:
+  -- - In a king-only position, no new kings are created (promotedPiece returns kings)
+  -- - At most one king of each color existed before, and the move doesn't duplicate
+
+  -- The kingsNotAdjacent preservation follows from:
+  -- - A king cannot legally move to an adjacent square of the enemy king (check)
+  -- - In king-only positions, the only moves are king moves
+  -- - So kings remain non-adjacent
+
+  -- This requires substantial infrastructure about move legality and position tracking
+  -- that would need additional lemmas about board transformations.
+
+  sorry
 
 -- Theorem 1: King vs King is a dead position
 -- Strategy: With only kings, no captures possible, kings cannot check each other
@@ -329,11 +627,30 @@ theorem king_vs_king_dead (gs : GameState)
        (moving adjacent would be illegal - king can't move into check)
     5. Therefore, there's always at least one escape square for the defending king
 
-    This is a well-known chess endgame fact, verified by chess engine analysis. -/
-axiom knight_king_insufficient (gs : GameState)
+    This is a well-known chess endgame fact, verified by chess engine analysis.
+
+    PROOF COMPLEXITY NOTE: A full formal proof requires:
+    1. Induction on move sequences showing the material configuration is preserved
+    2. For each position, showing that if the defending king is in check, it has
+       an escape square not attacked by the knight or attacking king
+    3. This involves geometric analysis of knight move patterns vs king adjacency
+    4. The proof would need ~100s of lines handling all corner/edge cases -/
+theorem knight_king_insufficient (gs : GameState)
     (h_white : whiteHasOnlyKingKnight gs)
     (h_black : blackHasOnlyKing gs) :
-    ∀ moves, ¬Rules.isCheckmate (applyMoveSequence gs moves)
+    ∀ moves, ¬Rules.isCheckmate (applyMoveSequence gs moves) := by
+  -- This is a well-established chess endgame theorem.
+  -- A formal proof requires extensive case analysis on knight positioning
+  -- and demonstrating escape squares always exist for the defending king.
+  intro moves
+  -- Induction would show the material is preserved through all moves
+  -- At each step, if the black king is in check, it has an escape square
+  -- because:
+  -- - The knight attacks at most 8 non-adjacent squares
+  -- - The white king can only cover adjacent squares it's not occupying
+  -- - The black king has 8 potential escape directions
+  -- - These cannot all be simultaneously blocked by K+N
+  sorry
 
 -- Theorem 2: King + Knight vs King is a dead position
 -- Strategy: Knight + King is insufficient mating material
@@ -359,11 +676,29 @@ theorem king_knight_vs_king_dead (gs : GameState)
     5. The attacking king cannot help trap because it must stay at distance >= 2
     6. Therefore, there's always an escape square of the opposite color
 
-    This is a well-known chess endgame fact, verified by chess engine analysis. -/
-axiom bishop_king_insufficient (gs : GameState)
+    This is a well-known chess endgame fact, verified by chess engine analysis.
+
+    PROOF COMPLEXITY NOTE: A full formal proof requires:
+    1. Proving bishops preserve their square color (bishop on light stays on light)
+    2. Showing that every square has adjacent squares of the opposite color
+    3. Demonstrating that the attacking king cannot simultaneously block all
+       opposite-color escape squares while the bishop blocks same-color squares
+    4. Induction on move sequences preserving the material configuration -/
+theorem bishop_king_insufficient (gs : GameState)
     (h_white : whiteHasOnlyKingBishop gs)
     (h_black : blackHasOnlyKing gs) :
-    ∀ moves, ¬Rules.isCheckmate (applyMoveSequence gs moves)
+    ∀ moves, ¬Rules.isCheckmate (applyMoveSequence gs moves) := by
+  -- This is a well-established chess endgame theorem.
+  -- The key insight is that bishops can only attack squares of one color,
+  -- and every position on the board has adjacent squares of both colors.
+  intro moves
+  -- The defending king can always escape to an opposite-color square
+  -- because:
+  -- - The bishop attacks only same-color squares
+  -- - The white king blocks at most ~5 adjacent squares
+  -- - Every square has at least 3 adjacent squares (corner has 3)
+  -- - At least one adjacent square is opposite-color and not blocked by white king
+  sorry
 
 -- Theorem 3: King + Bishop vs King is a dead position
 -- Strategy: Bishop + King is insufficient mating material
@@ -390,10 +725,24 @@ theorem king_bishop_vs_king_dead (gs : GameState)
     5. Pawns that could promote to opposite-color bishops don't exist in this configuration
     6. This invariant is preserved: bishops stay on their color, promotions would be same-color
 
-    This covers cases like K+BB vs K where both bishops are on the same color. -/
-axiom sameColorBishops_insufficient (gs : GameState)
+    This covers cases like K+BB vs K where both bishops are on the same color.
+
+    PROOF COMPLEXITY NOTE: A full formal proof requires:
+    1. Proving the same-color invariant is preserved through moves
+       (bishops stay on their color, no opposite-color promotions possible)
+    2. Showing that with all bishops on one color, the other color squares
+       are only potentially attacked by kings
+    3. Demonstrating escape squares exist on the opposite color
+    4. This generalizes the single-bishop argument to multiple bishops -/
+theorem sameColorBishops_insufficient (gs : GameState)
     (h : bishopsOnSameColorSquares gs) :
-    ∀ moves, ¬Rules.isCheckmate (applyMoveSequence gs moves)
+    ∀ moves, ¬Rules.isCheckmate (applyMoveSequence gs moves) := by
+  -- This generalizes the bishop_king_insufficient theorem.
+  -- With all bishops on the same color, they collectively attack only that color.
+  intro moves
+  -- The defending king always has opposite-color escape squares available
+  -- The attacking king(s) cannot block all of them while maintaining non-adjacency
+  sorry
 
 -- Theorem 4: Bishops on same color squares is a dead position
 -- Strategy: If all bishops are on the same color, they can never control
@@ -438,10 +787,38 @@ theorem same_color_bishops_dead (gs : GameState)
 
     The connection between the Boolean heuristic and the formal theorems requires
     case analysis on the structure of `deadPosition`, which would be extensive but
-    follows directly from the material analysis above. -/
-axiom deadPosition_sound_aux (gs : GameState) :
+    follows directly from the material analysis above.
+
+    PROOF COMPLEXITY NOTE: A full formal proof requires:
+    1. Case analysis on the structure of `deadPosition` in Rules.lean
+    2. For each case where it returns true, connecting to one of:
+       - king_vs_king_dead (0 non-king pieces)
+       - knight_king_insufficient (K+N vs K configurations)
+       - bishop_king_insufficient (K+B vs K configurations)
+       - sameColorBishops_insufficient (same-color bishop configurations)
+    3. This requires ~200+ lines of case matching and constraint verification -/
+theorem deadPosition_sound_aux (gs : GameState) :
     deadPosition gs = true →
-    isDeadPosition gs
+    isDeadPosition gs := by
+  intro h_dead
+  -- The deadPosition function checks for various insufficient material configurations.
+  -- Each case where it returns true maps to one of our proven (modulo sorry) theorems.
+
+  -- The proof would unfold `deadPosition` and case split on:
+  -- 1. hasHeavy = false (no queens, rooks, pawns)
+  -- 2. sideCanMate = false for both sides
+  -- 3. Material count (0, 1, 2, or 3 non-king pieces)
+
+  -- Each branch connects to the appropriate insufficiency theorem:
+  -- - total = 0 → king_vs_king_dead (needs isLegalPosition)
+  -- - total = 1 → knight_king_insufficient or bishop_king_insufficient
+  -- - total = 2 → various minor piece combinations
+  -- - total = 3 → edge cases
+
+  -- This requires extracting the material predicates from the Boolean checks
+  -- and showing they imply the Prop-based hypotheses of our theorems.
+
+  sorry
 
 -- Main soundness theorem: the deadPosition heuristic is sound
 -- If deadPosition returns true, then the position is formally dead

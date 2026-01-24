@@ -29,18 +29,19 @@ def runPerftSmoke : IO Unit := do
     (Thunk.mk fun _ => 8902)
 
 def runEdgePerft : IO Unit := do
-  -- En passant position tests (validated against standard perft suite)
+  -- En passant position tests (corrected after isPawnCapture sign fix)
   let epFen := "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"
   expectPerftFromFEN "en passant perft depth 1" epFen 1 7
-  expectPerftFromFEN "en passant perft depth 2" epFen 2 41
+  expectPerftFromFEN "en passant perft depth 2" epFen 2 38
   -- Castling position tests (validated against fast test suite)
   let castleFen := "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"
   expectPerftFromFEN "castling perft depth 1" castleFen 1 26
   expectPerftFromFEN "castling perft depth 2" castleFen 2 568
 
 def runPerftDeep : IO Unit := do
+  -- Corrected value after isPawnCapture sign fix
   let deepFen := "4k3/8/3p4/4P3/6K1/8/8/8 w - - 0 1"
-  expectPerftFromFEN "deep perft depth 4" deepFen 4 3941
+  expectPerftFromFEN "deep perft depth 4" deepFen 4 3391
 
 def fuzzFens : List String :=
   [ "r1bq1rk1/pppp1ppp/2n5/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 2 8"
@@ -191,6 +192,7 @@ structure PerftBenchmark where
 
 -- Perft benchmarks validated against standard perft suites.
 -- Only include positions with verified node counts.
+-- Benchmark values corrected after isPawnCapture sign fix
 def perftBenchmarks : List PerftBenchmark :=
   [ { label := "Starting position depth 4"
       fen := Parsing.startFEN
@@ -199,7 +201,7 @@ def perftBenchmarks : List PerftBenchmark :=
   , { label := "Kiwipete depth 3"
       fen := "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
       depth := 3
-      expectedNodes := 97983 } ]
+      expectedNodes := 97862 } ]
 
 def runPerftBenchmarks : IO Unit := do
   IO.println "[Benchmarks] Starting perft benchmarks with timing"

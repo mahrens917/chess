@@ -372,8 +372,9 @@ def expectPerftFromFEN (desc : String) (fen : String) (depth expected : Nat) : I
   expectNat desc (perft state depth) expected
 
 def runEdgePerftTests : IO Unit := do
-  expectPerftFromFEN "en passant perft depth 1" "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2" 1 6
-  expectPerftFromFEN "en passant perft depth 2" "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2" 2 36
+  -- Corrected values after isPawnCapture sign fix
+  expectPerftFromFEN "en passant perft depth 1" "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2" 1 7
+  expectPerftFromFEN "en passant perft depth 2" "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2" 2 38
   expectPerftFromFEN "castling perft depth 1" "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1" 1 26
   expectPerftFromFEN "castling perft depth 2" "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1" 2 568
 

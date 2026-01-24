@@ -68,8 +68,9 @@ def isPawnAdvance (c : Color) (source target : Square) : Prop :=
   source ≠ target ∧ fileDiff source target = 0 ∧
     (rankDiff source target = -pawnDirection c ∨ rankDiff source target = -2 * pawnDirection c)
 
+-- Pawn captures move 1 square diagonally forward (same direction as advances)
 def isPawnCapture (c : Color) (source target : Square) : Prop :=
-  source ≠ target ∧ absInt (fileDiff source target) = 1 ∧ rankDiff source target = pawnDirection c
+  source ≠ target ∧ absInt (fileDiff source target) = 1 ∧ rankDiff source target = -pawnDirection c
 instance instDecidableIsPawnCapture (c : Color) (source target : Square) : Decidable (isPawnCapture c source target) := by
   unfold isPawnCapture
   infer_instance
@@ -163,8 +164,82 @@ theorem pawn_capture_offset {c : Color} {source target : Square} (h : isPawnCapt
   h.2.1
 
 theorem pawn_capture_forward {c : Color} {source target : Square} (h : isPawnCapture c source target) :
-    rankDiff source target = pawnDirection c :=
+    rankDiff source target = -pawnDirection c :=
   h.2.2
+
+-- ============================================================================
+-- Bool/Prop Bridge Lemmas
+-- ============================================================================
+
+/-- Bidirectional equivalence between isKingStepBool and isKingStep -/
+theorem isKingStepBool_eq_true_iff_isKingStep (source target : Square) :
+    isKingStepBool source target = true ↔ isKingStep source target := by
+  unfold isKingStepBool isKingStep
+  constructor
+  · intro h
+    by_cases hEq : source = target
+    · simp [hEq] at h
+    · simp only [hEq, ↓reduceIte] at h
+      constructor
+      · exact hEq
+      · split at h
+        · rename_i hFile
+          split at h
+          · rename_i hRank
+            exact ⟨hFile, hRank⟩
+          · simp at h
+        · simp at h
+  · intro ⟨hNe, hFile, hRank⟩
+    simp only [hNe, ↓reduceIte, hFile, hRank]
+
+/-- Bidirectional equivalence between isKnightMoveBool and isKnightMove -/
+theorem isKnightMoveBool_eq_true_iff_isKnightMove (source target : Square) :
+    isKnightMoveBool source target = true ↔ isKnightMove source target := by
+  unfold isKnightMoveBool isKnightMove
+  constructor
+  · intro h
+    by_cases hEq : source = target
+    · simp [hEq] at h
+    · simp only [hEq, ↓reduceIte] at h
+      constructor
+      · exact hEq
+      · split at h
+        · rename_i hFile1
+          split at h
+          · rename_i hRank2
+            exact Or.inl ⟨hFile1, hRank2⟩
+          · simp at h
+        · split at h
+          · rename_i hNotFile1 hFile2
+            split at h
+            · rename_i hRank1
+              exact Or.inr ⟨hFile2, hRank1⟩
+            · simp at h
+          · simp at h
+  · intro ⟨hNe, hCases⟩
+    simp only [hNe, ↓reduceIte]
+    cases hCases with
+    | inl hCase1 =>
+      simp only [hCase1.1, ↓reduceIte, hCase1.2]
+    | inr hCase2 =>
+      have hNotFile1 : absInt (fileDiff source target) ≠ 1 := by
+        simp only [hCase2.1]; decide
+      simp only [↓reduceIte, hCase2.1, hCase2.2]
+      decide
+
+/-- Target in kingTargets iff isKingStep holds -/
+theorem mem_kingTargets_iff (source target : Square) :
+    target ∈ kingTargets source ↔ isKingStep source target := by
+  unfold kingTargets
+  simp only [List.mem_filter, Square.mem_all, true_and]
+  exact isKingStepBool_eq_true_iff_isKingStep source target
+
+/-- Target in knightTargets iff isKnightMove holds -/
+theorem mem_knightTargets_iff (source target : Square) :
+    target ∈ knightTargets source ↔ isKnightMove source target := by
+  unfold knightTargets
+  simp only [List.mem_filter, Square.mem_all, true_and]
+  exact isKnightMoveBool_eq_true_iff_isKnightMove source target
 
 -- ============================================================================
 -- Helper Lemmas for Path Validation

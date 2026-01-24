@@ -14,8 +14,7 @@ This file exists to break a circular dependency:
 import Chess.Rules
 import Chess.Spec
 import Chess.Parsing_SAN_Proofs
--- Note: SemanticRespectsGeometryLemmas depends on ParsingProofs which has build issues
--- import Chess.SemanticRespectsGeometryLemmas
+import Chess.SemanticRespectsGeometryLemmas
 import Chess.SemanticCaptureFlagLemmas
 
 namespace Chess
@@ -70,42 +69,57 @@ theorem allLegalMoves_sound_fideLegalCore (gs : GameState) (m : Move)
     exact hDestFree
   exact ⟨hTurnEq, hBoardOrigin, hDestFreeProp, hKingSafe⟩
 
-/--
-Axiomatized statement that moves from pieceTargets respect geometry.
-
-This is the key lemma connecting move generation to semantic geometry constraints.
-The full proof is in SemanticRespectsGeometryLemmas.respectsGeometry_of_pieceTargets,
-but that file depends on ParsingProofs which has build issues.
-
-The lemma is structurally verified by inspection of pieceTargets:
-- King moves: either standard king-step moves, or castle moves with proper geometry
-- Queen/Rook/Bishop moves: generated from sliding targets respecting direction constraints
-- Knight moves: generated from Movement.knightTargets (knight-step distances)
-- Pawn moves: either advances (one or two squares forward) or diagonal captures
-
-Each branch of pieceTargets produces moves satisfying the respectsGeometry predicate.
--/
-axiom respectsGeometry_of_pieceTargets
-    (gs : GameState) (src : Square) (p : Piece) (m : Move) :
-    m ∈ pieceTargets gs src p →
-    respectsGeometry gs m
+-- respectsGeometry_of_pieceTargets is imported from Chess.SemanticRespectsGeometryLemmas
 
 /--
-Helper axiom: Converts allLegalMoves membership to the encodedLegal structure.
-This is axiomatized because RulesComplete.mem_allLegalMoves_iff_encodedLegal
-depends on ParsingProofs that has build issues.
-
-The equivalence is structurally verified by the definition of allLegalMoves which
-filters pieceTargets through respectsPin and basicLegalAndSafe.
+Helper: membership in legalMovesForCached implies encodedLegal structure.
 -/
-axiom mem_allLegalMoves_implies_encodedLegal (gs : GameState) (m : Move) :
+private theorem mem_legalMovesForCached_implies_encodedLegal
+    (gs : GameState) (sq : Square) (pins : List (Square × Square)) (m : Move) :
+    m ∈ legalMovesForCached gs sq pins →
+    ∃ p,
+      gs.board sq = some p ∧
+      p.color = gs.toMove ∧
+      m ∈ pieceTargets gs sq p ∧
+      respectsPin pins m = true ∧
+      basicLegalAndSafe gs m = true := by
+  intro hmem
+  unfold legalMovesForCached at hmem
+  split at hmem
+  · simp at hmem
+  · rename_i p heq
+    split at hmem
+    · simp at hmem
+    · rename_i hcolor
+      -- hcolor : ¬p.color ≠ gs.toMove, which means p.color = gs.toMove
+      have hcolor' : p.color = gs.toMove := Classical.not_not.mp hcolor
+      -- hmem : m ∈ (pieceTargets gs sq p).filter (respectsPin pins) |>.filter (basicLegalAndSafe gs)
+      have hmem_filter2 := List.mem_filter.mp hmem
+      have hmem_filter1 := List.mem_filter.mp hmem_filter2.1
+      exact ⟨p, heq, hcolor', hmem_filter1.1, hmem_filter1.2, hmem_filter2.2⟩
+
+/--
+Converts allLegalMoves membership to the encodedLegal structure.
+The proof traces membership through the foldr structure of allLegalMoves.
+-/
+theorem mem_allLegalMoves_implies_encodedLegal (gs : GameState) (m : Move) :
     m ∈ allLegalMoves gs →
     ∃ sq p,
       gs.board sq = some p ∧
       p.color = gs.toMove ∧
       m ∈ pieceTargets gs sq p ∧
       respectsPin (pinnedSquares gs gs.toMove) m = true ∧
-      basicLegalAndSafe gs m = true
+      basicLegalAndSafe gs m = true := by
+  intro hmem
+  unfold allLegalMoves at hmem
+  have h := Parsing.mem_foldr_append
+    (fun sq => legalMovesForCached gs sq (pinnedSquares gs gs.toMove))
+    [] allSquares m hmem
+  rcases h with hinit | ⟨sq, _, hsq⟩
+  · simp at hinit
+  · have ⟨p, hBoard, hColor, hTargets, hPin, hSafe⟩ :=
+      mem_legalMovesForCached_implies_encodedLegal gs sq _ m hsq
+    exact ⟨sq, p, hBoard, hColor, hTargets, hPin, hSafe⟩
 
 /--
 Soundness lemma: Every move in allLegalMoves respects the geometry constraints.

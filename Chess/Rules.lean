@@ -102,6 +102,11 @@ def isEnemyAt (b : Board) (c : Color) (sq : Square) : Bool :=
   | some p => p.color ≠ c
   | none => false
 
+def isEnemyNonKingAt (b : Board) (c : Color) (sq : Square) : Bool :=
+  match b sq with
+  | some p => p.color ≠ c && p.pieceType ≠ PieceType.King
+  | none => false
+
 def isEmpty (b : Board) (sq : Square) : Bool :=
   b sq = none
 

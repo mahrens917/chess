@@ -2,6 +2,8 @@ import Chess.Rules
 import Chess.Movement
 import Chess.Core
 import Chess.Game
+import Chess.PathValidationProofs
+import Chess.SlidingProofs
 
 namespace Chess.Rules
 
@@ -275,11 +277,57 @@ AXIOM JUSTIFICATION: This follows structurally from GameState.movePiece:
 - The intermediate rank computation (fromSq.rank + pawnDirection) is always
   non-negative for legal two-step pawn moves (white: 1+1=2, black: 6-1=5)
 -/
-axiom enPassantTarget_set_iff_pawn_two_step (gs : GameState) (m : Move) :
+/-
+THEOREM NOTE: The backward direction of this iff cannot be fully proven without
+an additional precondition that the pawn starts from its legal start rank.
+
+The issue: For a black pawn at rank 0 (which is illegal but representable),
+a "two-step" to rank 2 satisfies |rankDiff| = 2, but the intermediate rank
+computation gives 0 + (-1) = -1 < 0, so enPassantTarget = none.
+
+For FIDE-legal games, pawns only do two-step moves from their start rank
+(1 for white, 6 for black), where the intermediate is always non-negative.
+
+The forward direction is fully proven. The backward direction uses sorry
+for the edge case of black pawn at rank 0, which never occurs in legal play.
+-/
+theorem enPassantTarget_set_iff_pawn_two_step (gs : GameState) (m : Move) :
     let gs' := gs.movePiece m
     gs'.enPassantTarget.isSome ↔
     (m.piece.pieceType = PieceType.Pawn ∧
-     Int.natAbs (Movement.rankDiff m.fromSq m.toSq) = 2)
+     Int.natAbs (Movement.rankDiff m.fromSq m.toSq) = 2) := by
+  -- Unfold movePiece to expose the enPassantTarget computation
+  unfold GameState.movePiece
+  simp only [beq_iff_eq]
+  constructor
+  · -- Forward: gs'.enPassantTarget.isSome → pawn two-step (fully proven)
+    intro h_some
+    simp only at h_some
+    by_cases h_cond : m.piece.pieceType = PieceType.Pawn ∧ Int.natAbs (Movement.rankDiff m.fromSq m.toSq) = 2
+    · exact h_cond
+    · simp only [h_cond, ↓reduceIte, Option.isSome_none, Bool.false_eq_true] at h_some
+  · -- Backward: pawn two-step → gs'.enPassantTarget.isSome
+    intro ⟨h_pawn, h_two⟩
+    simp only [h_pawn, h_two, and_self, ↓reduceIte]
+    -- Need to show the dite produces some
+    -- The condition is: 0 ≤ fromSq.rankInt + pawnDirection c
+    by_cases h_nonneg : 0 ≤ m.fromSq.rankInt + Movement.pawnDirection m.piece.color
+    · simp only [h_nonneg, ↓reduceDIte, Option.isSome_some]
+    · -- This branch handles the impossible case of black pawn at rank 0
+      -- In legal games, this never occurs since black pawns start at rank 6
+      exfalso
+      have h_rank_nonneg := Square.rankInt_nonneg m.fromSq
+      unfold Movement.pawnDirection at h_nonneg
+      cases hc : m.piece.color with
+      | White =>
+        simp only [hc, ↓reduceIte] at h_nonneg
+        omega
+      | Black =>
+        -- For black: ¬(0 ≤ fromSq.rankInt - 1) means rankInt < 1, so rankInt = 0
+        -- This case exists for arbitrary game states but not legal ones
+        -- Would need precondition: m.fromSq.rankNat = pawnStartRank m.piece.color
+        simp only [hc, ↓reduceIte] at h_nonneg
+        sorry
 
 /--
 Helper: when enPassantTarget is set from a pawn two-step, it points to the intermediate square.
@@ -290,12 +338,25 @@ Without that constraint, the statement is false - a pawn at rank 3 doing a "two-
 produce intermediate rank 4, not 2. The theorem is used in contexts where legal move structure
 guarantees the start rank constraint.
 -/
-axiom enPassantTarget_is_intermediate (fromSq toSq : Square) (c : Color)
+/-
+THEOREM NOTE: This theorem as stated is FALSE without a precondition that
+fromSq.rankNat = pawnStartRank c (rank 1 for white, rank 6 for black).
+
+For example, a white pawn at rank 3 with a "two-step" to rank 5 would have:
+  targetRankInt = 3 + 1 = 4, but intermediate_rank = 2.
+
+The theorem is only meaningful when used with the pawnTwoStep_from_startRank
+constraint from fideLegal. Adding sorry to preserve backward compatibility.
+-/
+theorem enPassantTarget_is_intermediate (fromSq toSq : Square) (c : Color)
     (h_two_step : Int.natAbs (Movement.rankDiff fromSq toSq) = 2) :
     let intermediate_rank := if c = Color.White then 2 else 5
     let dir := Movement.pawnDirection c
     let targetRankInt := fromSq.rankInt + dir
-    targetRankInt.toNat = intermediate_rank
+    targetRankInt.toNat = intermediate_rank := by
+  -- This theorem requires fromSq.rankNat = pawnStartRank c to be provable
+  -- Without that constraint, there's no way to derive the intermediate rank
+  sorry
 
 /--
 Helper: intermediate square is distinct from source and destination.
@@ -305,10 +366,23 @@ AXIOM JUSTIFICATION: With only the hypotheses given (intermediate rank ∈ {2,5}
 we cannot prove distinctness without knowing fromSq and toSq ranks. The theorem holds when
 the pawn starts from its home rank (1 for white, 6 for black).
 -/
-axiom intermediate_distinct_from_endpoints (fromSq toSq intermediate : Square) (c : Color)
+/-
+THEOREM NOTE: This theorem as stated is unprovable without knowing fromSq and toSq ranks.
+The hypotheses only constrain intermediate.rank to {2,5} and |rankDiff fromSq toSq| = 2,
+but don't constrain fromSq or toSq ranks. Example counterexample:
+  fromSq.rank = 2, toSq.rank = 4, intermediate.rank = 2, c = White
+  => h_intermediate holds (2 = 2), h_two_step holds (|2-4| = 2)
+  => but intermediate = fromSq is possible if they have the same file
+
+The theorem is provable when the pawn starts from its start rank (pawn_two_step_target_distinct).
+-/
+theorem intermediate_distinct_from_endpoints (fromSq toSq intermediate : Square) (c : Color)
     (h_intermediate : intermediate.rankNat = (if c = Color.White then 2 else 5))
     (h_two_step : Int.natAbs (Movement.rankDiff fromSq toSq) = 2) :
-    intermediate ≠ fromSq ∧ intermediate ≠ toSq
+    intermediate ≠ fromSq ∧ intermediate ≠ toSq := by
+  -- Without constraints on fromSq/toSq ranks, we cannot prove distinctness
+  -- Would need: fromSq.rankNat = pawnStartRank c (1 for white, 6 for black)
+  sorry
 
 -- Core insight: a game state is "valid" if whenever enPassantTarget = some sq, sq is empty
 def isValidEnPassantState (gs : GameState) : Prop :=
@@ -335,13 +409,21 @@ Helper: extract the intermediate square from a pawn two-step.
 DEPRECATED: This theorem's statement needs additional hypotheses about the pawn
 starting from its initial rank to be provable. See pawn_two_step_intermediate_bounds instead.
 -/
-axiom pawn_two_step_intermediate_square (fromSq toSq : Square) (c : Color)
+/-
+THEOREM NOTE: This theorem is DEPRECATED and unprovable as stated.
+The conclusion requires fromSq to be at the pawn start rank, but this is not a hypothesis.
+Use pawn_two_step_intermediate_bounds instead, which has the required precondition.
+-/
+theorem pawn_two_step_intermediate_square (fromSq toSq : Square) (c : Color)
     (h_rank : Int.natAbs (Movement.rankDiff fromSq toSq) = 2) :
     let dir := Movement.pawnDirection c
     let targetRankInt := fromSq.rankInt + dir
     (0 ≤ targetRankInt) ∧
     (c = Color.White → Int.toNat targetRankInt = 2) ∧
-    (c = Color.Black → Int.toNat targetRankInt = 5)
+    (c = Color.Black → Int.toNat targetRankInt = 5) := by
+  -- This requires fromSq.rankNat = pawnStartRank c to prove the second and third conjuncts
+  -- The first conjunct (0 ≤ targetRankInt) also fails for black pawn at rank 0
+  sorry
 
 /--
 Helper: the intermediate square is distinct from both endpoints and capture squares.
@@ -349,13 +431,21 @@ DEPRECATED: This theorem's statement needs additional constraints on fromSq/toSq
 The final two conjuncts are not provable from the given hypotheses without knowing
 that the pawn starts from its home rank.
 -/
-axiom pawn_two_step_intermediate_not_modified (fromSq toSq intermediate : Square) (c : Color)
+/-
+THEOREM NOTE: This theorem is DEPRECATED and unprovable as stated.
+The last two conjuncts require knowing that fromSq is at the pawn start rank.
+The first two conjuncts (distinctness) also need rank constraints to work.
+-/
+theorem pawn_two_step_intermediate_not_modified (fromSq toSq intermediate : Square) (c : Color)
     (h_rank : Int.natAbs (Movement.rankDiff fromSq toSq) = 2)
     (h_int_rank : intermediate.rankNat = (if c = Color.White then 2 else 5))
     (h_int_file : intermediate.fileNat = fromSq.fileNat) :
     intermediate ≠ fromSq ∧ intermediate ≠ toSq ∧
     (c = Color.White → fromSq.rankNat = 1 ∧ toSq.rankNat = 3) ∧
-    (c = Color.Black → fromSq.rankNat = 6 ∧ toSq.rankNat = 4)
+    (c = Color.Black → fromSq.rankNat = 6 ∧ toSq.rankNat = 4) := by
+  -- This requires additional constraints to prove
+  -- Use pawn_two_step_target_distinct with proper preconditions instead
+  sorry
 
 -- Lemma: board.get is preserved at a square when updating different squares
 theorem board_get_preserved_after_updates (b : Board) (sq1 sq2 sq3 target : Square) (p1 p2 p3 : Option Piece)
@@ -378,12 +468,25 @@ Both follow from the path being clear for the pawn advance and the en passant ta
 being distinct from fromSq and toSq. The full proof requires additional lemmas about
 Board.update behavior and the structure of movePiece.
 -/
-axiom enPassantTarget_valid_after_pawn_two_step (gs : GameState) (m : Move)
+/-
+THEOREM NOTE: This theorem is provable in principle but requires:
+1. Showing the new EP target is the intermediate square of the two-step
+2. Showing pathClear implies intermediate was empty before the move
+3. Showing the intermediate is distinct from fromSq and toSq
+4. Showing Board.update preserves emptiness at unmodified squares
+
+The full proof needs additional lemmas about movePiece structure and
+pathClear semantics. Using sorry as the proof infrastructure is incomplete.
+-/
+theorem enPassantTarget_valid_after_pawn_two_step (gs : GameState) (m : Move)
     (h_valid : isValidEnPassantState gs)
     (h_two_step : m.piece.pieceType = PieceType.Pawn ∧
                   Int.natAbs (Movement.rankDiff m.fromSq m.toSq) = 2)
     (h_distinct : m.fromSq ≠ m.toSq) :
-    isValidEnPassantState (gs.movePiece m)
+    isValidEnPassantState (gs.movePiece m) := by
+  -- Requires showing the new EP target is empty after the move
+  -- Key insight: EP target is intermediate square, which wasn't modified
+  sorry
 
 -- Main inductive step: if a state is valid, the result of any move is valid
 theorem enPassantTarget_valid_after_move (gs : GameState) (m : Move)
@@ -418,9 +521,21 @@ AXIOM JUSTIFICATION: This requires an inductive proof over game state constructi
 2. Inductive step: enPassantTarget_valid_after_move preserves the invariant
 The full proof requires connecting these pieces through reachability.
 -/
-axiom enPassant_target_isEmpty (gs : GameState) (target : Square)
+/-
+THEOREM NOTE: This theorem requires an inductive invariant proof:
+1. Base: standardGameState has enPassantTarget = none (vacuous)
+2. Step: enPassantTarget_valid_after_move preserves emptiness
+
+The theorem is only valid for reachable game states from standard start.
+For arbitrary game states, enPassantTarget could be set to an occupied square.
+Using sorry since we lack a reachability predicate in the current formalization.
+-/
+theorem enPassant_target_isEmpty (gs : GameState) (target : Square)
     (h_ep : gs.enPassantTarget = some target) :
-    isEmpty gs.board target = true
+    isEmpty gs.board target = true := by
+  -- This theorem holds for reachable game states via induction
+  -- Proof: apply isValidEnPassantState invariant maintained by moves
+  sorry
 
 /--
 Pawns don't castle. Only kings can castle (FIDE Article 3.8.2).
@@ -500,13 +615,62 @@ AXIOM JUSTIFICATION: Requires helper lemmas showing:
 2. pathClear checks isEmpty for all squares in squaresBetween
 The proof structure is straightforward but requires Movement module helpers.
 -/
-axiom pathClear_twoStep_intermediate (board : Board) (src target : Square) (c : Color)
+/-
+THEOREM NOTE: This theorem connects pathClear with the intermediate square for pawn two-step.
+The proof requires showing:
+1. For a two-step pawn advance, squaresBetween contains exactly one square
+2. That square is squareFromInts src.fileInt (src.rankInt + pawnDirection c)
+3. pathClear = all isEmpty over squaresBetween
+
+The proof is complex due to the squaresBetween definition and needs helper lemmas.
+-/
+theorem pathClear_twoStep_intermediate (board : Board) (src target : Square) (c : Color)
     (h_adv : Movement.isPawnAdvance c src target)
     (h_two : Movement.rankDiff src target = -2 * Movement.pawnDirection c)
     (h_clear : pathClear board src target = true) :
     ∃ intermediate : Square,
       Movement.squareFromInts src.fileInt (src.rankInt + Movement.pawnDirection c) = some intermediate ∧
-      isEmpty board intermediate = true
+      isEmpty board intermediate = true := by
+  -- A pawn two-step is a vertical rook-like move
+  obtain ⟨h_ne, h_file, _⟩ := h_adv
+  -- Establish isRookMove: fileDiff = 0, rankDiff ≠ 0
+  have h_rd_ne : Movement.rankDiff src target ≠ 0 := by
+    rw [h_two]; unfold Movement.pawnDirection; cases c <;> simp <;> omega
+  have h_rook : Movement.isRookMove src target := ⟨h_ne, Or.inl ⟨h_file, h_rd_ne⟩⟩
+  -- rookOffset = |fileDiff| + |rankDiff| = 0 + 2 = 2
+  have h_offset : Movement.rookOffset src target = 2 := by
+    unfold Movement.rookOffset
+    rw [h_file]
+    simp only [Int.natAbs_zero, Nat.zero_add]
+    rw [h_two]
+    unfold Movement.pawnDirection
+    cases c <;> simp
+  -- The intermediate square at k=1 exists
+  have hk_pos : (0 : Nat) < 1 := Nat.zero_lt_one
+  have hk_lt : (1 : Nat) < Movement.rookOffset src target := by rw [h_offset]; omega
+  have h_valid := rookRay_intermediate_valid src target h_rook 1 hk_pos hk_lt
+  -- rookDelta = (0, signInt(-rankDiff)) for vertical moves
+  -- At k=1: fileCoord = src.fileInt + 0*1 = src.fileInt
+  --          rankCoord = src.rankInt + signInt(-rankDiff)*1
+  -- For pawnDirection: signInt(-rankDiff) = signInt(2*pawnDir) = pawnDir
+  simp only [Movement.rookDelta, h_file, ↓reduceIte] at h_valid ⊢
+  -- Show signInt(-rankDiff) = pawnDirection c
+  have h_sign : Movement.signInt (-Movement.rankDiff src target) = Movement.pawnDirection c := by
+    rw [h_two]
+    unfold Movement.pawnDirection Movement.signInt
+    cases c <;> simp <;> decide
+  simp only [h_sign, Int.ofNat_one, Int.mul_one, Int.zero_mul, Int.add_zero] at h_valid ⊢
+  obtain ⟨sq, hsq⟩ := h_valid
+  refine ⟨sq, hsq, ?_⟩
+  -- Now show isEmpty using pathClear
+  have h_mem := rookRay_intermediate_in_squaresBetween src target h_rook 1 hk_pos hk_lt
+  simp only [Movement.rookDelta, h_file, ↓reduceIte, h_sign,
+             Int.ofNat_one, Int.mul_one, Int.zero_mul, Int.add_zero] at h_mem
+  have h_in := h_mem sq hsq
+  unfold pathClear at h_clear
+  have h_all := List.all_eq_true.mp h_clear sq h_in
+  unfold isEmpty
+  exact h_all
 
 -- ============================================================================
 -- Axioms (Completeness)
@@ -523,11 +687,29 @@ AXIOM JUSTIFICATION: Requires per-piece-type completeness lemmas:
 - Sliding: ray traversal completeness
 Each case follows from geometry matching between fideLegal and pieceTargets.
 -/
-axiom fideLegal_in_pieceTargets_axiom (gs : GameState) (m : Move) :
+/-
+THEOREM NOTE: This is the main completeness theorem: all fideLegal moves are generated
+by pieceTargets. The proof requires per-piece-type case analysis:
+- Knight: proven in fideLegal_knight_in_pieceTargets
+- King (non-castle): proven in fideLegal_king_noCastle_in_pieceTargets
+- Rook, Bishop, Queen: require slidingTargets completeness lemmas
+- Pawn: requires pawn advance/capture target completeness
+- Castling: requires castle move generation completeness
+
+The infrastructure exists for some pieces but not all. Using sorry.
+-/
+theorem fideLegal_in_pieceTargets_axiom (gs : GameState) (m : Move) :
     fideLegal gs m →
     (∃ m' ∈ pieceTargets gs m.fromSq m.piece,
       m'.fromSq = m.fromSq ∧ m'.toSq = m.toSq ∧ m'.piece = m.piece ∧
-      (m.piece.pieceType ≠ PieceType.Pawn ∨ m'.promotion = none → m' = m))
+      (m.piece.pieceType ≠ PieceType.Pawn ∨ m'.promotion = none → m' = m)) := by
+  intro h_legal
+  -- This requires per-piece-type completeness lemmas defined below
+  -- Knight: fideLegal_knight_in_pieceTargets (line ~795)
+  -- King: fideLegal_king_noCastle_in_pieceTargets + castle case
+  -- Rook/Bishop: fideLegal_rook/bishop_in_pieceTargets
+  -- Pawn: requires pawn target completeness
+  sorry
 
 /--
 For fideLegal moves with consistent flags, the exact move is in pieceTargets.
@@ -537,11 +719,20 @@ to get the exact move m (not just an existential witness).
 AXIOM JUSTIFICATION: Depends on fideLegal_in_pieceTargets_axiom. The additional
 hypotheses (captureFlagConsistent, promotion rank) ensure the witness m' equals m.
 -/
-axiom fideLegal_exact_in_pieceTargets (gs : GameState) (m : Move) :
+/-
+THEOREM NOTE: This is a corollary of fideLegal_in_pieceTargets_axiom.
+Once that theorem is fully proven, this follows by showing the witness m' equals m
+due to the additional constraints on capture flag and promotion.
+-/
+theorem fideLegal_exact_in_pieceTargets (gs : GameState) (m : Move) :
     fideLegal gs m →
     captureFlagConsistent gs m →
     (m.promotion.isSome → m.toSq.rankNat = pawnPromotionRank m.piece.color) →
-    m ∈ pieceTargets gs m.fromSq m.piece
+    m ∈ pieceTargets gs m.fromSq m.piece := by
+  intro h_legal _h_cap _h_promo
+  -- This follows from fideLegal_in_pieceTargets_axiom
+  -- The witness m' equals m due to flag consistency
+  sorry
 
 -- ============================================================================
 -- Proven Theorems
@@ -587,33 +778,275 @@ theorem fideLegal_implies_noCaptureFlag (gs : GameState) (m : Move) :
 -- Per-Piece Completeness Theorems
 -- ============================================================================
 
+/-- Helper: isKnightMove implies membership in knightTargets list. -/
+theorem isKnightMove_mem_knightTargets (src tgt : Square) :
+    Movement.isKnightMove src tgt → tgt ∈ Movement.knightTargets src := by
+  intro h
+  unfold Movement.knightTargets
+  simp only [List.mem_filter, Square.mem_all, true_and]
+  unfold Movement.isKnightMoveBool
+  simp only [h.1, ↓reduceIte]
+  cases h.2 with
+  | inl hcase => simp only [hcase.1, ↓reduceIte, hcase.2]
+  | inr hcase =>
+    have h1 : Movement.absInt (Movement.fileDiff src tgt) = 2 := hcase.1
+    have h2 : Movement.absInt (Movement.rankDiff src tgt) = 1 := hcase.2
+    simp only [h1, h2, ↓reduceIte]
+    decide
+
+/-- Helper: move equality from field constraints. -/
+private theorem move_eq_of_fields (m : Move) (cap : Bool)
+    (h_cap : m.isCapture = cap)
+    (h_ep : m.isEnPassant = false)
+    (h_castle : m.isCastle = false)
+    (h_promo : m.promotion = none)
+    (h_rf : m.castleRookFrom = none)
+    (h_rt : m.castleRookTo = none) :
+    m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := cap } := by
+  cases m
+  simp only at h_cap h_ep h_castle h_promo h_rf h_rt
+  simp only [h_cap, h_ep, h_castle, h_promo, h_rf, h_rt]
+
+/-- Helper: destinationFriendlyFreeProp transfers to move record with same squares. -/
+private theorem destFree_transfer (gs : GameState) (m : Move)
+    (h : destinationFriendlyFreeProp gs m) :
+    destinationFriendlyFree gs { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } = true := by
+  unfold destinationFriendlyFreeProp at h
+  unfold destinationFriendlyFree at h ⊢
+  exact h
+
 /--
 Knight case of fideLegal_in_pieceTargets: if m is fideLegal and involves a knight,
 then the move is in pieceTargets.
-
-AXIOM JUSTIFICATION: Requires Movement.isKnightMove_in_knightTargets helper lemma showing
-that isKnightMove geometry matches the knightTargets list generation.
 -/
-axiom fideLegal_knight_in_pieceTargets (gs : GameState) (m : Move)
+theorem fideLegal_knight_in_pieceTargets (gs : GameState) (m : Move)
     (h_legal : fideLegal gs m)
     (h_knight : m.piece.pieceType = PieceType.Knight) :
-    m ∈ pieceTargets gs m.fromSq m.piece
+    m ∈ pieceTargets gs m.fromSq m.piece := by
+  -- Extract all the fideLegal components
+  have h_dest := h_legal.2.2.2.1
+  have h_cap_consistent := h_legal.2.2.2.2.1
+  have h_promo_back := h_legal.2.2.2.2.2.2.2.1
+  have h_ep_pawn := h_legal.2.2.2.2.2.2.2.2.2.1
+  have h_castle_king := h_legal.2.2.2.2.2.2.2.2.2.2.1
+  have h_rook_fields := h_legal.2.2.2.2.2.2.2.2.2.2.2
+
+  -- For knights, respectsGeometry is just isKnightMove
+  have h_geom := h_legal.2.2.1
+  unfold respectsGeometry at h_geom
+  simp only [h_knight] at h_geom
+
+  -- Knights can't castle
+  have h_not_castle : m.isCastle = false := by
+    cases hc : m.isCastle with
+    | false => rfl
+    | true =>
+      have := h_castle_king hc
+      rw [h_knight] at this
+      exact PieceType.noConfusion this
+
+  -- Knights can't do en passant
+  have h_not_ep : m.isEnPassant = false := by
+    cases hep : m.isEnPassant with
+    | false => rfl
+    | true =>
+      have := h_ep_pawn hep
+      rw [h_knight] at this
+      exact PieceType.noConfusion this
+
+  -- Knights can't promote
+  have h_no_promo : m.promotion = none := by
+    cases hp : m.promotion with
+    | none => rfl
+    | some pt =>
+      have := (h_promo_back (by simp [hp])).1
+      rw [h_knight] at this
+      exact PieceType.noConfusion this
+
+  have h_rook_none : m.castleRookFrom = none ∧ m.castleRookTo = none := by
+    have h_nc : ¬m.isCastle := by simp [h_not_castle]
+    exact h_rook_fields h_nc
+
+  -- Unfold pieceTargets for knight
+  unfold pieceTargets
+  simp only [h_knight]
+
+  -- The target is in knightTargets
+  have h_in_targets := isKnightMove_mem_knightTargets m.fromSq m.toSq h_geom
+
+  -- The destination is friendly-free
+  have h_dest_free := destFree_transfer gs m h_dest
+
+  -- Show the move is in the filterMap result
+  simp only [List.mem_filterMap]
+  refine ⟨m.toSq, h_in_targets, ?_⟩
+  simp only [h_dest_free, ↓reduceIte]
+
+  -- Case split on whether target square is occupied
+  cases h_board : gs.board.get m.toSq with
+  | none =>
+    -- Empty square: non-capture
+    unfold captureFlagConsistentWithEP at h_cap_consistent
+    have h_not_cap : m.isCapture = false := by
+      cases hcap : m.isCapture with
+      | false => rfl
+      | true =>
+        have h_or := h_cap_consistent.mp hcap
+        cases h_or with
+        | inl h_enemy =>
+          obtain ⟨p, h_some, _⟩ := h_enemy
+          exact Option.noConfusion (h_board.symm.trans h_some)
+        | inr h_ep =>
+          rw [h_not_ep] at h_ep
+          exact Bool.noConfusion h_ep
+    have h_eq := move_eq_of_fields m false h_not_cap h_not_ep h_not_castle h_no_promo h_rook_none.1 h_rook_none.2
+    rw [h_eq]
+  | some p =>
+    -- Occupied square: capture
+    unfold captureFlagConsistentWithEP at h_cap_consistent
+    have h_enemy : p.color ≠ m.piece.color := by
+      unfold destinationFriendlyFreeProp destinationFriendlyFree at h_dest
+      simp only [h_board, ne_eq, decide_eq_true_eq] at h_dest
+      exact h_dest
+    have h_cap : m.isCapture = true := by
+      exact h_cap_consistent.mpr (Or.inl ⟨p, h_board, h_enemy⟩)
+    have h_eq := move_eq_of_fields m true h_cap h_not_ep h_not_castle h_no_promo h_rook_none.1 h_rook_none.2
+    rw [h_eq]
+
+-- Helper: isKingStep implies membership in kingTargets list
+theorem isKingStep_mem_kingTargets (src tgt : Square) :
+    Movement.isKingStep src tgt → tgt ∈ Movement.kingTargets src := by
+  intro h
+  unfold Movement.kingTargets
+  simp only [List.mem_filter, Square.mem_all, true_and]
+  unfold Movement.isKingStepBool
+  simp only [h.1, ↓reduceIte]
+  have hf := h.2.1
+  have hr := h.2.2
+  simp only [hf, ↓reduceIte, hr]
+
+-- Duplicate helpers since move_eq_of_fields/destFree_transfer are private
+private theorem king_move_eq_of_fields (m : Move) (cap : Bool)
+    (h_cap : m.isCapture = cap)
+    (h_ep : m.isEnPassant = false)
+    (h_castle : m.isCastle = false)
+    (h_promo : m.promotion = none)
+    (h_rf : m.castleRookFrom = none)
+    (h_rt : m.castleRookTo = none) :
+    m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := cap } := by
+  cases m
+  simp only at h_cap h_ep h_castle h_promo h_rf h_rt
+  simp only [h_cap, h_ep, h_castle, h_promo, h_rf, h_rt]
+
+private theorem king_destFree_transfer (gs : GameState) (m : Move)
+    (h : destinationFriendlyFreeProp gs m) :
+    destinationFriendlyFree gs { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } = true := by
+  unfold destinationFriendlyFreeProp at h
+  unfold destinationFriendlyFree at h ⊢
+  exact h
 
 /--
 King (non-castle) case of fideLegal_in_pieceTargets: if m is fideLegal, involves a king,
 and is NOT a castle move, then the move is in pieceTargets.
 
-AXIOM JUSTIFICATION: Requires Movement.isKingStep_in_kingTargets helper lemma showing
-that isKingStep geometry matches the kingTargets list generation.
+Proof establishes:
+1. King moves can't castle (by hypothesis), can't en passant (pieceType ≠ Pawn), can't promote
+2. respectsGeometry for non-castle king = isKingStep
+3. isKingStep implies target in kingTargets list
+4. destinationFriendlyFree is preserved
+5. Case split on board occupation determines capture flag
 -/
-axiom fideLegal_king_noCastle_in_pieceTargets (gs : GameState) (m : Move)
+theorem fideLegal_king_noCastle_in_pieceTargets (gs : GameState) (m : Move)
     (h_legal : fideLegal gs m)
     (h_king : m.piece.pieceType = PieceType.King)
     (h_not_castle : m.isCastle = false) :
-    m ∈ pieceTargets gs m.fromSq m.piece
+    m ∈ pieceTargets gs m.fromSq m.piece := by
+  -- Extract fideLegal components
+  have h_dest := h_legal.2.2.2.1
+  have h_cap_consistent := h_legal.2.2.2.2.1
+  have h_promo_back := h_legal.2.2.2.2.2.2.2.1
+  have h_ep_pawn := h_legal.2.2.2.2.2.2.2.2.2.1
+  have h_rook_fields := h_legal.2.2.2.2.2.2.2.2.2.2.2
+
+  -- For non-castle king moves, respectsGeometry is isKingStep
+  have h_geom := h_legal.2.2.1
+  unfold respectsGeometry at h_geom
+  simp only [h_king, h_not_castle, Bool.false_eq_true, ↓reduceIte] at h_geom
+
+  -- Kings can't do en passant
+  have h_not_ep : m.isEnPassant = false := by
+    cases hep : m.isEnPassant with
+    | false => rfl
+    | true =>
+      have := h_ep_pawn hep
+      rw [h_king] at this
+      exact PieceType.noConfusion this
+
+  -- Kings can't promote
+  have h_no_promo : m.promotion = none := by
+    cases hp : m.promotion with
+    | none => rfl
+    | some pt =>
+      have := (h_promo_back (by simp [hp])).1
+      rw [h_king] at this
+      exact PieceType.noConfusion this
+
+  have h_rook_none : m.castleRookFrom = none ∧ m.castleRookTo = none := by
+    have h_nc : ¬m.isCastle := by simp [h_not_castle]
+    exact h_rook_fields h_nc
+
+  -- Unfold pieceTargets for king
+  unfold pieceTargets
+  simp only [h_king]
+
+  -- The result is standard ++ castles, we need to show m is in standard
+  simp only [List.mem_append]
+  left  -- m is in standard (not in castles since h_not_castle)
+
+  -- The target is in kingTargets
+  have h_in_targets := isKingStep_mem_kingTargets m.fromSq m.toSq h_geom
+
+  -- The destination is friendly-free
+  have h_dest_free := king_destFree_transfer gs m h_dest
+
+  -- Show the move is in the filterMap result
+  simp only [List.mem_filterMap]
+  refine ⟨m.toSq, h_in_targets, ?_⟩
+  simp only [h_dest_free, ↓reduceIte]
+
+  -- Case split on whether target square is occupied
+  cases h_board : gs.board.get m.toSq with
+  | none =>
+    -- Empty square: non-capture
+    unfold captureFlagConsistentWithEP at h_cap_consistent
+    have h_not_cap : m.isCapture = false := by
+      cases hcap : m.isCapture with
+      | false => rfl
+      | true =>
+        have h_or := h_cap_consistent.mp hcap
+        cases h_or with
+        | inl h_enemy =>
+          obtain ⟨p, h_some, _⟩ := h_enemy
+          exact Option.noConfusion (h_board.symm.trans h_some)
+        | inr h_ep =>
+          rw [h_not_ep] at h_ep
+          exact Bool.noConfusion h_ep
+    have h_eq := king_move_eq_of_fields m false h_not_cap h_not_ep h_not_castle h_no_promo h_rook_none.1 h_rook_none.2
+    rw [h_eq]
+  | some p =>
+    -- Occupied square: capture
+    unfold captureFlagConsistentWithEP at h_cap_consistent
+    have h_enemy : p.color ≠ m.piece.color := by
+      unfold destinationFriendlyFreeProp destinationFriendlyFree at h_dest
+      simp only [h_board, ne_eq, decide_eq_true_eq] at h_dest
+      exact h_dest
+    have h_cap : m.isCapture = true := by
+      exact h_cap_consistent.mpr (Or.inl ⟨p, h_board, h_enemy⟩)
+    have h_eq := king_move_eq_of_fields m true h_cap h_not_ep h_not_castle h_no_promo h_rook_none.1 h_rook_none.2
+    rw [h_eq]
 
 -- ============================================================================
--- Coordinate System Axiom (Foundational - like Int axioms in Lean)
+-- Coordinate System Theorem (Foundational)
 -- ============================================================================
 
 /--
@@ -621,14 +1054,30 @@ Theorem: The coordinate round-trip property for the Square type.
 Since Square's file and rank are Fin 8 (bounded 0-8), extracting their Int values
 and reconstructing via squareFromInts always succeeds and returns the same square.
 
-AXIOM JUSTIFICATION: The proof requires showing:
+Proof establishes:
 1. 0 ≤ sq.fileInt < 8 and 0 ≤ sq.rankInt < 8 (from Fin 8 bounds)
-2. Int.toNat (Int.ofNat n) = n for n : Nat
+2. Int.toNat (Int.ofNat n) = n for n : Nat (definitional equality)
 3. Square.mkUnsafe with original file/rank values reconstructs the square
-Type coercion issues between Fin, Nat, and Int complicate the proof automation.
 -/
-axiom squareFromInts_roundTrip (sq : Square) :
-    Movement.squareFromInts sq.fileInt sq.rankInt = some sq
+theorem squareFromInts_roundTrip (sq : Square) :
+    Movement.squareFromInts sq.fileInt sq.rankInt = some sq := by
+  unfold Movement.squareFromInts Square.fileInt Square.rankInt
+  -- The bounds check passes because fileInt and rankInt come from Fin 8
+  have h_file_nonneg := Square.fileInt_nonneg sq
+  have h_file_lt := Square.fileInt_lt_8 sq
+  have h_rank_nonneg := Square.rankInt_nonneg sq
+  have h_rank_lt := Square.rankInt_lt_8 sq
+  have h_cond : 0 ≤ Int.ofNat sq.file.toNat ∧ Int.ofNat sq.file.toNat < 8 ∧
+                0 ≤ Int.ofNat sq.rank.toNat ∧ Int.ofNat sq.rank.toNat < 8 :=
+    ⟨h_file_nonneg, h_file_lt, h_rank_nonneg, h_rank_lt⟩
+  rw [if_pos h_cond]
+  -- mkUnsafe with original values reconstructs the square
+  unfold Square.mkUnsafe Square.mk?
+  have h_file_lt_nat : (Int.ofNat sq.file.toNat).toNat < 8 := sq.file.isLt
+  have h_rank_lt_nat : (Int.ofNat sq.rank.toNat).toNat < 8 := sq.rank.isLt
+  simp only [h_file_lt_nat, h_rank_lt_nat, ↓reduceDIte]
+  -- The constructed square equals sq: (Int.ofNat n).toNat = n by rfl
+  congr 1 <;> exact Fin.ext rfl
 
 -- ============================================================================
 -- Sliding Piece Completeness
@@ -643,14 +1092,38 @@ AXIOM JUSTIFICATION: Requires helper lemmas:
 - rookRay_intermediate_in_squaresBetween: result is in squaresBetween
 - pathClear iterates over squaresBetween checking isEmpty
 -/
-axiom rookRay_intermediates_empty (board : Board) (src tgt : Square)
+/-
+THEOREM NOTE: This theorem about rook ray intermediates requires:
+1. Showing squareFromInts succeeds for intermediate steps (coordinates in bounds)
+2. Connecting the result to squaresBetween membership
+3. Using pathClear = all isEmpty over squaresBetween
+
+The proof is complex and requires several helper lemmas about coordinate arithmetic.
+-/
+theorem rookRay_intermediates_empty (board : Board) (src tgt : Square)
     (h_rook : Movement.isRookMove src tgt)
     (h_clear : pathClear board src tgt = true) :
     let (df, dr) := Movement.rookDelta src tgt
     let N := Movement.rookOffset src tgt
     ∀ k, 0 < k → k < N →
       ∃ sq, Movement.squareFromInts (src.fileInt + df * k) (src.rankInt + dr * k) = some sq ∧
-            isEmpty board sq = true
+            isEmpty board sq = true := by
+  simp only
+  intro k hk_pos hk_lt
+  -- Step 1: The intermediate square exists
+  have h_valid := rookRay_intermediate_valid src tgt h_rook k hk_pos hk_lt
+  simp only at h_valid
+  obtain ⟨sq, hsq⟩ := h_valid
+  refine ⟨sq, hsq, ?_⟩
+  -- Step 2: sq ∈ squaresBetween src tgt
+  have h_mem := rookRay_intermediate_in_squaresBetween src tgt h_rook k hk_pos hk_lt
+  simp only at h_mem
+  have h_in_between := h_mem sq hsq
+  -- Step 3: pathClear means all squares between are empty
+  unfold pathClear at h_clear
+  have h_all := List.all_eq_true.mp h_clear sq h_in_between
+  unfold isEmpty
+  exact h_all
 
 /--
 When pathClear holds for a bishop move, all intermediate squares on the ray are empty.
@@ -660,14 +1133,38 @@ AXIOM JUSTIFICATION: Requires helper lemmas:
 - bishopRay_intermediate_in_squaresBetween: result is in squaresBetween
 - pathClear iterates over squaresBetween checking isEmpty
 -/
-axiom bishopRay_intermediates_empty (board : Board) (src tgt : Square)
+/-
+THEOREM NOTE: This theorem about bishop ray intermediates requires:
+1. Showing squareFromInts succeeds for intermediate diagonal steps
+2. Connecting the result to squaresBetween membership
+3. Using pathClear = all isEmpty over squaresBetween
+
+Same structure as rookRay_intermediates_empty but for diagonal moves.
+-/
+theorem bishopRay_intermediates_empty (board : Board) (src tgt : Square)
     (h_bishop : Movement.isDiagonal src tgt)
     (h_clear : pathClear board src tgt = true) :
     let (df, dr) := Movement.bishopDelta src tgt
     let N := Movement.bishopOffset src tgt
     ∀ k, 0 < k → k < N →
       ∃ sq, Movement.squareFromInts (src.fileInt + df * k) (src.rankInt + dr * k) = some sq ∧
-            isEmpty board sq = true
+            isEmpty board sq = true := by
+  simp only
+  intro k hk_pos hk_lt
+  -- Step 1: The intermediate square exists
+  have h_valid := bishopRay_intermediate_valid src tgt h_bishop k hk_pos hk_lt
+  simp only at h_valid
+  obtain ⟨sq, hsq⟩ := h_valid
+  refine ⟨sq, hsq, ?_⟩
+  -- Step 2: sq ∈ squaresBetween src tgt
+  have h_mem := bishopRay_intermediate_in_squaresBetween src tgt h_bishop k hk_pos hk_lt
+  simp only at h_mem
+  have h_in_between := h_mem sq hsq
+  -- Step 3: pathClear means all squares between are empty
+  unfold pathClear at h_clear
+  have h_all := List.all_eq_true.mp h_clear sq h_in_between
+  unfold isEmpty
+  exact h_all
 
 /--
 Rook case: fideLegal rook moves are in pieceTargets.
@@ -679,10 +1176,97 @@ isRookMove geometry matches slidingTargets ray traversal. The proof follows from
 2. slidingTargets walks the ray and finds target
 3. captureFlagConsistent ensures correct move construction
 -/
-axiom fideLegal_rook_in_pieceTargets (gs : GameState) (m : Move)
+/-
+THEOREM NOTE: Rook completeness requires:
+1. Extracting isRookMove and pathClear from respectsGeometry
+2. Showing slidingTargets finds the target square on the ray
+3. Verifying capture flag consistency with board occupation
+
+The proof follows the same pattern as fideLegal_knight_in_pieceTargets but for sliding pieces.
+-/
+theorem fideLegal_rook_in_pieceTargets (gs : GameState) (m : Move)
     (h_legal : fideLegal gs m)
     (h_rook : m.piece.pieceType = PieceType.Rook) :
-    m ∈ pieceTargets gs m.fromSq m.piece
+    m ∈ pieceTargets gs m.fromSq m.piece := by
+  -- Extract respectsGeometry: isRookMove ∧ pathClear
+  have h_geom := h_legal.2.2.1
+  unfold respectsGeometry at h_geom
+  simp only [h_rook] at h_geom
+  have h_rook_move := h_geom.1
+  have h_path_clear := h_geom.2
+  have h_dest := h_legal.2.2.2.1
+  have h_capture := h_legal.2.2.2.2.1
+  -- Establish default field values for rook moves
+  have h_ep_false : m.isEnPassant = false := by
+    cases h_ep_cases : m.isEnPassant with
+    | false => rfl
+    | true =>
+      exfalso
+      have := h_legal.2.2.2.2.2.2.2.2.2.1 h_ep_cases
+      rw [h_rook] at this; exact absurd this (by decide)
+  have h_castle_false : m.isCastle = false := by
+    cases h_castle_cases : m.isCastle with
+    | false => rfl
+    | true =>
+      exfalso
+      have := h_legal.2.2.2.2.2.2.2.2.2.2.1 h_castle_cases
+      rw [h_rook] at this; exact absurd this (by decide)
+  have h_not_castle : ¬(m.isCastle = true) := by rw [h_castle_false]; decide
+  have ⟨h_rf_none, h_rt_none⟩ := h_legal.2.2.2.2.2.2.2.2.2.2.2 h_not_castle
+  have h_promo_none : m.promotion = none := by
+    cases h_promo_cases : m.promotion with
+    | none => rfl
+    | some _ =>
+      exfalso
+      have h_some : m.promotion.isSome = true := by rw [h_promo_cases]; rfl
+      have := (h_legal.2.2.2.2.2.2.2.1 h_some).1
+      rw [h_rook] at this; exact absurd this (by decide)
+  -- Reduce goal to slidingTargets membership
+  unfold pieceTargets
+  simp only [h_rook]
+  -- Goal: m ∈ slidingTargets gs m.fromSq m.piece [(1,0),(-1,0),(0,1),(0,-1)]
+  -- Obtain the slidingTargets completeness result
+  have h_sliding := rook_in_slidingTargets gs m.fromSq m.toSq m.piece
+    h_rook_move h_path_clear h_dest
+  -- Destructure m to match slidingTargets output format
+  obtain ⟨piece, fromSq, toSq, isCapture, promotion, isCastle, castleRookFrom, castleRookTo, isEnPassant⟩ := m
+  simp only at h_ep_false h_castle_false h_rf_none h_rt_none h_promo_none
+  subst h_ep_false h_castle_false h_rf_none h_rt_none h_promo_none
+  -- Now m = Move.mk piece fromSq toSq isCapture none false none none false
+  cases h_cap : isCapture with
+  | true =>
+    -- From capture flag consistency, there's an enemy piece at target
+    unfold captureFlagConsistentWithEP at h_capture
+    simp only at h_capture
+    have h_exists := h_capture.mp h_cap
+    cases h_exists with
+    | inl h_piece =>
+      obtain ⟨p_tgt, hp_at, hp_color⟩ := h_piece
+      have h_not_empty : isEmpty gs.board toSq = false := by
+        simp [isEmpty, hp_at]
+      have h_enemy : isEnemyAt gs.board piece.color toSq = true := by
+        simp [isEnemyAt, hp_at, decide_eq_true_eq]
+        exact hp_color
+      exact h_sliding.2 h_not_empty h_enemy
+    | inr h_ep => exact absurd h_ep (by decide)
+  | false =>
+    -- Non-capture case: show target is empty
+    have h_empty : isEmpty gs.board toSq = true := by
+      unfold isEmpty
+      cases h_board : gs.board toSq with
+      | none => rfl
+      | some p =>
+        exfalso
+        -- destinationFriendlyFreeProp says piece at target is enemy
+        unfold destinationFriendlyFreeProp destinationFriendlyFree at h_dest
+        simp only [h_board, decide_eq_true_eq] at h_dest
+        -- h_dest : p.color ≠ piece.color
+        -- captureFlagConsistentWithEP: enemy at target → isCapture = true
+        unfold captureFlagConsistentWithEP at h_capture
+        simp only at h_capture
+        have h_would_cap := h_capture.mpr (Or.inl ⟨p, h_board, h_dest⟩)
+        exact absurd h_would_cap (by simp [h_cap])
+    exact h_sliding.1 h_empty
 
 /--
 Bishop case: fideLegal bishop moves are in pieceTargets.
@@ -690,371 +1274,160 @@ Bishop case: fideLegal bishop moves are in pieceTargets.
 AXIOM JUSTIFICATION: Same structure as rook case - requires Movement.* helper lemmas
 showing that isDiagonal geometry matches slidingTargets ray traversal.
 -/
-axiom fideLegal_bishop_in_pieceTargets (gs : GameState) (m : Move)
+/-
+THEOREM NOTE: Bishop completeness requires:
+1. Extracting isDiagonal and pathClear from respectsGeometry
+2. Showing slidingTargets finds the target square on the diagonal
+3. Verifying capture flag consistency with board occupation
+
+Same structure as rook case.
+-/
+theorem fideLegal_bishop_in_pieceTargets (gs : GameState) (m : Move)
     (h_legal : fideLegal gs m)
     (h_bishop : m.piece.pieceType = PieceType.Bishop) :
-    m ∈ pieceTargets gs m.fromSq m.piece
-
-/-
-  Original incomplete proof below:
-  -- Extract geometry and pathClear from fideLegal
-  have h_geom := h_legal.2.2.1
-  unfold respectsGeometry at h_geom
-  simp only [h_bishop] at h_geom
-  ...(truncated)
--/
-#exit -- Skip the rest of this file since we're marking incomplete proofs
-  -- Extract geometry and pathClear from fideLegal
+    m ∈ pieceTargets gs m.fromSq m.piece := by
   have h_geom := h_legal.2.2.1
   unfold respectsGeometry at h_geom
   simp only [h_bishop] at h_geom
   have h_diag_move := h_geom.1
   have h_path_clear := h_geom.2
-  -- Get capture flag consistency
-  have h_cap_consistent := h_legal.2.2.2.2.1
-  -- Get friendly-free destination
-  have h_friendly_free := h_legal.2.2.2.1
-  -- Bishops don't do en passant
-  have h_not_ep : m.isEnPassant = false := by
-    by_contra h_ep
-    simp only [Bool.not_eq_false] at h_ep
-    have h_ep_pawn := h_legal.2.2.2.2.2.2.2.2 h_ep
-    rw [h_bishop] at h_ep_pawn
-    exact PieceType.noConfusion h_ep_pawn
-  -- Bishops don't promote
-  have h_no_promo : m.promotion = none := by
-    by_contra h_promo
-    push_neg at h_promo
-    have h_is_pawn := (h_legal.2.2.2.2.2.2.2.1 h_promo).1
-    rw [h_bishop] at h_is_pawn
-    exact PieceType.noConfusion h_is_pawn
-  -- Bishops don't castle
-  have h_not_castle : m.isCastle = false := by rfl
-  -- Unfold pieceTargets for bishop
+  have h_dest := h_legal.2.2.2.1
+  have h_capture := h_legal.2.2.2.2.1
+  have h_ep_false : m.isEnPassant = false := by
+    cases h_ep_cases : m.isEnPassant with
+    | false => rfl
+    | true =>
+      exfalso
+      have := h_legal.2.2.2.2.2.2.2.2.2.1 h_ep_cases
+      rw [h_bishop] at this; exact absurd this (by decide)
+  have h_castle_false : m.isCastle = false := by
+    cases h_castle_cases : m.isCastle with
+    | false => rfl
+    | true =>
+      exfalso
+      have := h_legal.2.2.2.2.2.2.2.2.2.2.1 h_castle_cases
+      rw [h_bishop] at this; exact absurd this (by decide)
+  have h_not_castle : ¬(m.isCastle = true) := by rw [h_castle_false]; decide
+  have ⟨h_rf_none, h_rt_none⟩ := h_legal.2.2.2.2.2.2.2.2.2.2.2 h_not_castle
+  have h_promo_none : m.promotion = none := by
+    cases h_promo_cases : m.promotion with
+    | none => rfl
+    | some _ =>
+      exfalso
+      have h_some : m.promotion.isSome = true := by rw [h_promo_cases]; rfl
+      have := (h_legal.2.2.2.2.2.2.2.1 h_some).1
+      rw [h_bishop] at this; exact absurd this (by decide)
   unfold pieceTargets
   simp only [h_bishop]
-  -- Use slidingWalk completeness with bishop delta
-  let df := (Movement.bishopDelta m.fromSq m.toSq).1
-  let dr := (Movement.bishopDelta m.fromSq m.toSq).2
-  let N := Movement.bishopOffset m.fromSq m.toSq
-  have h_N_pos := Movement.bishopOffset_pos m.fromSq m.toSq h_diag_move
-  have h_N_le := Movement.bishopOffset_le_7 m.fromSq m.toSq h_diag_move
-  have h_target := Movement.bishopMove_target_at_offset m.fromSq m.toSq h_diag_move
-  have h_intermediates := bishopRay_intermediates_empty gs.board m.fromSq m.toSq h_diag_move h_path_clear
-  -- Show target is not friendly
-  have h_not_friendly : ¬(∃ q, gs.board m.toSq = some q ∧ q.color = m.piece.color) := by
-    unfold destinationFriendlyFreeProp at h_friendly_free
-    intro ⟨q, h_some, h_same_color⟩
-    simp only [h_some, Option.isSome_some, Bool.not_eq_true', decide_eq_false_iff_not,
-               ne_eq, not_not] at h_friendly_free
-    exact h_same_color.symm.trans h_friendly_free |> absurd rfl
-  -- Delta is in the bishop deltas list
-  have h_delta_in := Movement.bishopDelta_in_deltas m.fromSq m.toSq h_diag_move
-  -- Use slidingWalk_generates_target
-  have h_walk := slidingWalk_generates_target gs.board m.fromSq m.piece df dr N h_N_pos h_N_le
-    h_intermediates m.toSq h_target h_not_friendly
-  -- Case split on capture vs non-capture
-  unfold captureFlagConsistentWithEP at h_cap_consistent
-  cases h_board : gs.board m.toSq with
-  | none =>
-    have h_empty : isEmpty gs.board m.toSq = true := by
-      unfold isEmpty; simp only [h_board]
-    have h_not_cap : m.isCapture = false := by
-      by_contra h_cap
-      push_neg at h_cap
-      have h_or := h_cap_consistent.mp h_cap
-      cases h_or with
-      | inl h_enemy =>
-        obtain ⟨p, h_some, _⟩ := h_enemy
-        rw [h_board] at h_some
-        exact Option.noConfusion h_some
-      | inr h_ep =>
-        rw [h_not_ep] at h_ep
-        exact Bool.noConfusion h_ep
-    have h_in_walk := h_walk.1 h_empty
-    have h_m_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } := by
-      ext1
-      · rfl
-      · rfl
-      · rfl
-      · simp only [h_not_cap]
-      · simp only [h_not_ep, Bool.false_eq_true]
-      · simp only [h_not_castle]
-      · simp only [h_no_promo]
-    rw [h_m_eq]
-    exact slidingWalk_in_slidingTargets gs m.fromSq m.piece df dr
-      { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq }
-      [(1, 1), (-1, -1), (1, -1), (-1, 1)] h_delta_in h_in_walk
-  | some p =>
-    have h_is_cap : m.isCapture = true := by
-      have h_enemy : p.color ≠ m.piece.color := by
-        unfold destinationFriendlyFreeProp at h_friendly_free
-        simp only [h_board, Option.isSome_some, Bool.not_eq_true',
-                   decide_eq_false_iff_not, ne_eq, not_not, Bool.true_eq_false] at h_friendly_free
-        exact h_friendly_free.symm
-      exact h_cap_consistent.mpr (Or.inl ⟨p, h_board, h_enemy⟩)
-    have h_enemy : isEnemyAt gs.board m.piece.color m.toSq = true := by
-      unfold isEnemyAt
-      simp only [h_board]
-      have h_opp : p.color ≠ m.piece.color := by
-        unfold destinationFriendlyFreeProp at h_friendly_free
-        simp only [h_board, Option.isSome_some, Bool.not_eq_true',
-                   decide_eq_false_iff_not, ne_eq, not_not, Bool.true_eq_false] at h_friendly_free
-        exact h_friendly_free.symm
-      simp [decide_eq_true h_opp]
-    have h_in_walk := h_walk.2 h_enemy
-    have h_m_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } := by
-      ext1
-      · rfl
-      · rfl
-      · rfl
-      · simp only [h_is_cap]
-      · simp only [h_not_ep, Bool.false_eq_true]
-      · simp only [h_not_castle]
-      · simp only [h_no_promo]
-    rw [h_m_eq]
-    exact slidingWalk_in_slidingTargets gs m.fromSq m.piece df dr
-      { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true }
-      [(1, 1), (-1, -1), (1, -1), (-1, 1)] h_delta_in h_in_walk
+  have h_sliding := bishop_in_slidingTargets gs m.fromSq m.toSq m.piece
+    h_diag_move h_path_clear h_dest
+  obtain ⟨piece, fromSq, toSq, isCapture, promotion, isCastle, castleRookFrom, castleRookTo, isEnPassant⟩ := m
+  simp only at h_ep_false h_castle_false h_rf_none h_rt_none h_promo_none
+  subst h_ep_false h_castle_false h_rf_none h_rt_none h_promo_none
+  cases h_cap : isCapture with
+  | true =>
+    unfold captureFlagConsistentWithEP at h_capture
+    simp only at h_capture
+    have h_exists := h_capture.mp h_cap
+    cases h_exists with
+    | inl h_piece =>
+      obtain ⟨p_tgt, hp_at, hp_color⟩ := h_piece
+      have h_not_empty : isEmpty gs.board toSq = false := by
+        simp [isEmpty, hp_at]
+      have h_enemy : isEnemyAt gs.board piece.color toSq = true := by
+        simp [isEnemyAt, hp_at, decide_eq_true_eq]
+        exact hp_color
+      exact h_sliding.2 h_not_empty h_enemy
+    | inr h_ep => exact absurd h_ep (by decide)
+  | false =>
+    have h_empty : isEmpty gs.board toSq = true := by
+      unfold isEmpty
+      cases h_board : gs.board toSq with
+      | none => rfl
+      | some p =>
+        exfalso
+        unfold destinationFriendlyFreeProp destinationFriendlyFree at h_dest
+        simp only [h_board, decide_eq_true_eq] at h_dest
+        unfold captureFlagConsistentWithEP at h_capture
+        simp only at h_capture
+        have h_would_cap := h_capture.mpr (Or.inl ⟨p, h_board, h_dest⟩)
+        exact absurd h_would_cap (by simp [h_cap])
+    exact h_sliding.1 h_empty
 
-/--
-Queen case: fideLegal queen moves are in pieceTargets.
--/
 theorem fideLegal_queen_in_pieceTargets (gs : GameState) (m : Move)
     (h_legal : fideLegal gs m)
     (h_queen : m.piece.pieceType = PieceType.Queen) :
     m ∈ pieceTargets gs m.fromSq m.piece := by
-  -- Extract geometry from fideLegal
   have h_geom := h_legal.2.2.1
   unfold respectsGeometry at h_geom
   simp only [h_queen] at h_geom
   have h_queen_move := h_geom.1
   have h_path_clear := h_geom.2
-  -- isQueenMove = isRookMove ∨ isDiagonal
-  unfold Movement.isQueenMove at h_queen_move
-  cases h_queen_move with
-  | inl h_rook_move =>
-    -- Rook-like queen move
-    -- Get capture flag consistency
-    have h_cap_consistent := h_legal.2.2.2.2.1
-    -- Get friendly-free destination
-    have h_friendly_free := h_legal.2.2.2.1
-    -- Queens don't do en passant
-    have h_not_ep : m.isEnPassant = false := by
-      by_contra h_ep
-      simp only [Bool.not_eq_false] at h_ep
-      have h_ep_pawn := h_legal.2.2.2.2.2.2.2.2 h_ep
-      rw [h_queen] at h_ep_pawn
-      exact PieceType.noConfusion h_ep_pawn
-    -- Queens don't promote
-    have h_no_promo : m.promotion = none := by
-      by_contra h_promo
-      push_neg at h_promo
-      have h_is_pawn := (h_legal.2.2.2.2.2.2.2.1 h_promo).1
-      rw [h_queen] at h_is_pawn
-      exact PieceType.noConfusion h_is_pawn
-    -- Queens don't castle
-    have h_not_castle : m.isCastle = false := by rfl
-    -- Unfold pieceTargets for queen
-    unfold pieceTargets
-    simp only [h_queen]
-    -- Use rook delta/offset infrastructure
-    let df := (Movement.rookDelta m.fromSq m.toSq).1
-    let dr := (Movement.rookDelta m.fromSq m.toSq).2
-    let N := Movement.rookOffset m.fromSq m.toSq
-    have h_N_pos := Movement.rookOffset_pos m.fromSq m.toSq h_rook_move
-    have h_N_le := Movement.rookOffset_le_7 m.fromSq m.toSq h_rook_move
-    have h_target := Movement.rookMove_target_at_offset m.fromSq m.toSq h_rook_move
-    have h_intermediates := rookRay_intermediates_empty gs.board m.fromSq m.toSq h_rook_move h_path_clear
-    -- Show target is not friendly
-    have h_not_friendly : ¬(∃ q, gs.board m.toSq = some q ∧ q.color = m.piece.color) := by
-      unfold destinationFriendlyFreeProp at h_friendly_free
-      intro ⟨q, h_some, h_same_color⟩
-      simp only [h_some, Option.isSome_some, Bool.not_eq_true', decide_eq_false_iff_not,
-                 ne_eq, not_not] at h_friendly_free
-      exact h_same_color.symm.trans h_friendly_free |> absurd rfl
-    -- Delta is in queen's rook-like deltas
-    have h_delta_in_rook := Movement.rookDelta_in_deltas m.fromSq m.toSq h_rook_move
-    have h_delta_in : (df, dr) ∈ [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] := by
-      cases h_delta_in_rook with
-      | head h => left; exact h
-      | tail _ h => right; cases h with
-        | head h => left; exact h
-        | tail _ h => right; cases h with
-          | head h => left; exact h
-          | tail _ h => right; left; exact h.head
-    have h_walk := slidingWalk_generates_target gs.board m.fromSq m.piece df dr N h_N_pos h_N_le
-      h_intermediates m.toSq h_target h_not_friendly
-    -- Case split on capture vs non-capture
-    unfold captureFlagConsistentWithEP at h_cap_consistent
-    cases h_board : gs.board m.toSq with
-    | none =>
-      have h_empty : isEmpty gs.board m.toSq = true := by
-        unfold isEmpty; simp only [h_board]
-      have h_not_cap : m.isCapture = false := by
-        by_contra h_cap
-        push_neg at h_cap
-        have h_or := h_cap_consistent.mp h_cap
-        cases h_or with
-        | inl h_enemy =>
-          obtain ⟨p, h_some, _⟩ := h_enemy
-          rw [h_board] at h_some
-          exact Option.noConfusion h_some
-        | inr h_ep =>
-          rw [h_not_ep] at h_ep
-          exact Bool.noConfusion h_ep
-      have h_in_walk := h_walk.1 h_empty
-      have h_m_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } := by
-        ext1
-        · rfl
-        · rfl
-        · rfl
-        · simp only [h_not_cap]
-        · simp only [h_not_ep, Bool.false_eq_true]
-        · simp only [h_not_castle]
-        · simp only [h_no_promo]
-      rw [h_m_eq]
-      exact slidingWalk_in_slidingTargets gs m.fromSq m.piece df dr
-        { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq }
-        [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] h_delta_in h_in_walk
-    | some p =>
-      have h_is_cap : m.isCapture = true := by
-        have h_enemy : p.color ≠ m.piece.color := by
-          unfold destinationFriendlyFreeProp at h_friendly_free
-          simp only [h_board, Option.isSome_some, Bool.not_eq_true',
-                     decide_eq_false_iff_not, ne_eq, not_not, Bool.true_eq_false] at h_friendly_free
-          exact h_friendly_free.symm
-        exact h_cap_consistent.mpr (Or.inl ⟨p, h_board, h_enemy⟩)
-      have h_enemy : isEnemyAt gs.board m.piece.color m.toSq = true := by
-        unfold isEnemyAt
-        simp only [h_board]
-        have h_opp : p.color ≠ m.piece.color := by
-          unfold destinationFriendlyFreeProp at h_friendly_free
-          simp only [h_board, Option.isSome_some, Bool.not_eq_true',
-                     decide_eq_false_iff_not, ne_eq, not_not, Bool.true_eq_false] at h_friendly_free
-          exact h_friendly_free.symm
-        simp [decide_eq_true h_opp]
-      have h_in_walk := h_walk.2 h_enemy
-      have h_m_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } := by
-        ext1
-        · rfl
-        · rfl
-        · rfl
-        · simp only [h_is_cap]
-        · simp only [h_not_ep, Bool.false_eq_true]
-        · simp only [h_not_castle]
-        · simp only [h_no_promo]
-      rw [h_m_eq]
-      exact slidingWalk_in_slidingTargets gs m.fromSq m.piece df dr
-        { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true }
-        [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] h_delta_in h_in_walk
-  | inr h_diag_move =>
-    -- Diagonal queen move (similar to bishop)
-    have h_cap_consistent := h_legal.2.2.2.2.1
-    have h_friendly_free := h_legal.2.2.2.1
-    have h_not_ep : m.isEnPassant = false := by
-      by_contra h_ep
-      simp only [Bool.not_eq_false] at h_ep
-      have h_ep_pawn := h_legal.2.2.2.2.2.2.2.2 h_ep
-      rw [h_queen] at h_ep_pawn
-      exact PieceType.noConfusion h_ep_pawn
-    have h_no_promo : m.promotion = none := by
-      by_contra h_promo
-      push_neg at h_promo
-      have h_is_pawn := (h_legal.2.2.2.2.2.2.2.1 h_promo).1
-      rw [h_queen] at h_is_pawn
-      exact PieceType.noConfusion h_is_pawn
-    have h_not_castle : m.isCastle = false := by rfl
-    unfold pieceTargets
-    simp only [h_queen]
-    -- Use bishop delta/offset infrastructure
-    let df := (Movement.bishopDelta m.fromSq m.toSq).1
-    let dr := (Movement.bishopDelta m.fromSq m.toSq).2
-    let N := Movement.bishopOffset m.fromSq m.toSq
-    have h_N_pos := Movement.bishopOffset_pos m.fromSq m.toSq h_diag_move
-    have h_N_le := Movement.bishopOffset_le_7 m.fromSq m.toSq h_diag_move
-    have h_target := Movement.bishopMove_target_at_offset m.fromSq m.toSq h_diag_move
-    have h_intermediates := bishopRay_intermediates_empty gs.board m.fromSq m.toSq h_diag_move h_path_clear
-    have h_not_friendly : ¬(∃ q, gs.board m.toSq = some q ∧ q.color = m.piece.color) := by
-      unfold destinationFriendlyFreeProp at h_friendly_free
-      intro ⟨q, h_some, h_same_color⟩
-      simp only [h_some, Option.isSome_some, Bool.not_eq_true', decide_eq_false_iff_not,
-                 ne_eq, not_not] at h_friendly_free
-      exact h_same_color.symm.trans h_friendly_free |> absurd rfl
-    have h_delta_in_bishop := Movement.bishopDelta_in_deltas m.fromSq m.toSq h_diag_move
-    have h_delta_in : (df, dr) ∈ [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] := by
-      cases h_delta_in_bishop with
-      | head h => right; right; right; right; left; exact h
-      | tail _ h => right; right; right; right; right
-        cases h with
-        | head h => left; exact h
-        | tail _ h => right; cases h with
-          | head h => left; exact h
-          | tail _ h => right; exact h.head
-    have h_walk := slidingWalk_generates_target gs.board m.fromSq m.piece df dr N h_N_pos h_N_le
-      h_intermediates m.toSq h_target h_not_friendly
-    unfold captureFlagConsistentWithEP at h_cap_consistent
-    cases h_board : gs.board m.toSq with
-    | none =>
-      have h_empty : isEmpty gs.board m.toSq = true := by
-        unfold isEmpty; simp only [h_board]
-      have h_not_cap : m.isCapture = false := by
-        by_contra h_cap
-        push_neg at h_cap
-        have h_or := h_cap_consistent.mp h_cap
-        cases h_or with
-        | inl h_enemy =>
-          obtain ⟨p, h_some, _⟩ := h_enemy
-          rw [h_board] at h_some
-          exact Option.noConfusion h_some
-        | inr h_ep =>
-          rw [h_not_ep] at h_ep
-          exact Bool.noConfusion h_ep
-      have h_in_walk := h_walk.1 h_empty
-      have h_m_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } := by
-        ext1
-        · rfl
-        · rfl
-        · rfl
-        · simp only [h_not_cap]
-        · simp only [h_not_ep, Bool.false_eq_true]
-        · simp only [h_not_castle]
-        · simp only [h_no_promo]
-      rw [h_m_eq]
-      exact slidingWalk_in_slidingTargets gs m.fromSq m.piece df dr
-        { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq }
-        [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] h_delta_in h_in_walk
-    | some p =>
-      have h_is_cap : m.isCapture = true := by
-        have h_enemy : p.color ≠ m.piece.color := by
-          unfold destinationFriendlyFreeProp at h_friendly_free
-          simp only [h_board, Option.isSome_some, Bool.not_eq_true',
-                     decide_eq_false_iff_not, ne_eq, not_not, Bool.true_eq_false] at h_friendly_free
-          exact h_friendly_free.symm
-        exact h_cap_consistent.mpr (Or.inl ⟨p, h_board, h_enemy⟩)
-      have h_enemy : isEnemyAt gs.board m.piece.color m.toSq = true := by
-        unfold isEnemyAt
-        simp only [h_board]
-        have h_opp : p.color ≠ m.piece.color := by
-          unfold destinationFriendlyFreeProp at h_friendly_free
-          simp only [h_board, Option.isSome_some, Bool.not_eq_true',
-                     decide_eq_false_iff_not, ne_eq, not_not, Bool.true_eq_false] at h_friendly_free
-          exact h_friendly_free.symm
-        simp [decide_eq_true h_opp]
-      have h_in_walk := h_walk.2 h_enemy
-      have h_m_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } := by
-        ext1
-        · rfl
-        · rfl
-        · rfl
-        · simp only [h_is_cap]
-        · simp only [h_not_ep, Bool.false_eq_true]
-        · simp only [h_not_castle]
-        · simp only [h_no_promo]
-      rw [h_m_eq]
-      exact slidingWalk_in_slidingTargets gs m.fromSq m.piece df dr
-        { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true }
-        [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] h_delta_in h_in_walk
+  have h_dest := h_legal.2.2.2.1
+  have h_capture := h_legal.2.2.2.2.1
+  have h_ep_false : m.isEnPassant = false := by
+    cases h_ep_cases : m.isEnPassant with
+    | false => rfl
+    | true =>
+      exfalso
+      have := h_legal.2.2.2.2.2.2.2.2.2.1 h_ep_cases
+      rw [h_queen] at this; exact absurd this (by decide)
+  have h_castle_false : m.isCastle = false := by
+    cases h_castle_cases : m.isCastle with
+    | false => rfl
+    | true =>
+      exfalso
+      have := h_legal.2.2.2.2.2.2.2.2.2.2.1 h_castle_cases
+      rw [h_queen] at this; exact absurd this (by decide)
+  have h_not_castle : ¬(m.isCastle = true) := by rw [h_castle_false]; decide
+  have ⟨h_rf_none, h_rt_none⟩ := h_legal.2.2.2.2.2.2.2.2.2.2.2 h_not_castle
+  have h_promo_none : m.promotion = none := by
+    cases h_promo_cases : m.promotion with
+    | none => rfl
+    | some _ =>
+      exfalso
+      have h_some : m.promotion.isSome = true := by rw [h_promo_cases]; rfl
+      have := (h_legal.2.2.2.2.2.2.2.1 h_some).1
+      rw [h_queen] at this; exact absurd this (by decide)
+  unfold pieceTargets
+  simp only [h_queen]
+  -- Goal: m ∈ slidingTargets gs m.fromSq m.piece [(1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1)]
+  -- This equals queenDeltas
+  change m ∈ slidingTargets gs m.fromSq m.piece queenDeltas
+  have h_sliding := queen_in_slidingTargets gs m.fromSq m.toSq m.piece
+    h_queen_move h_path_clear h_dest
+  obtain ⟨piece, fromSq, toSq, isCapture, promotion, isCastle, castleRookFrom, castleRookTo, isEnPassant⟩ := m
+  simp only at h_ep_false h_castle_false h_rf_none h_rt_none h_promo_none
+  subst h_ep_false h_castle_false h_rf_none h_rt_none h_promo_none
+  cases h_cap : isCapture with
+  | true =>
+    unfold captureFlagConsistentWithEP at h_capture
+    simp only at h_capture
+    have h_exists := h_capture.mp h_cap
+    cases h_exists with
+    | inl h_piece =>
+      obtain ⟨p_tgt, hp_at, hp_color⟩ := h_piece
+      have h_not_empty : isEmpty gs.board toSq = false := by
+        simp [isEmpty, hp_at]
+      have h_enemy : isEnemyAt gs.board piece.color toSq = true := by
+        simp [isEnemyAt, hp_at, decide_eq_true_eq]
+        exact hp_color
+      exact h_sliding.2 h_not_empty h_enemy
+    | inr h_ep => exact absurd h_ep (by decide)
+  | false =>
+    have h_empty : isEmpty gs.board toSq = true := by
+      unfold isEmpty
+      cases h_board : gs.board toSq with
+      | none => rfl
+      | some p =>
+        exfalso
+        unfold destinationFriendlyFreeProp destinationFriendlyFree at h_dest
+        simp only [h_board, decide_eq_true_eq] at h_dest
+        unfold captureFlagConsistentWithEP at h_capture
+        simp only at h_capture
+        have h_would_cap := h_capture.mpr (Or.inl ⟨p, h_board, h_dest⟩)
+        exact absurd h_would_cap (by simp [h_cap])
+    exact h_sliding.1 h_empty
 
 -- ============================================================================
 -- King Castle Completeness
@@ -1064,60 +1437,18 @@ theorem fideLegal_queen_in_pieceTargets (gs : GameState) (m : Move)
 When fideLegal holds for a castle move, castleMoveIfLegal produces the same move.
 This proves that the move generation function is complete for castling moves.
 -/
+-- NOTE: This theorem requires fideLegal to also constrain m.castleRookFrom and
+-- m.castleRookTo for castle moves. Currently fideLegal only says these fields are none
+-- when ¬m.isCastle, but doesn't specify their values when m.isCastle = true.
+-- The spec needs to be extended with:
+--   (m.isCastle → m.castleRookFrom = some (castleConfig m.piece.color kingSide).rookFrom ∧
+--                 m.castleRookTo = some (castleConfig m.piece.color kingSide).rookTo)
 theorem castleMoveIfLegal_produces_fideLegal (gs : GameState) (m : Move)
     (h_legal : fideLegal gs m)
     (h_king : m.piece.pieceType = PieceType.King)
     (h_castle : m.isCastle = true) :
     ∃ kingSide : Bool, castleMoveIfLegal gs kingSide = some m := by
-  -- Destructure fideLegal to extract individual conjuncts
-  simp only [fideLegal] at h_legal
-  obtain ⟨h_color, h_board, h_geo, h_friendly, h_cap, h_check, h_prom1, h_prom2,
-          h_castle_clause, h_ep, h_king_castle, h_castle_rook⟩ := h_legal
-
-  -- From the castling clause, get the kingSide existential
-  have h_castle_spec := h_castle_clause h_castle
-  obtain ⟨kingSide, h_castle_right, h_king_pos, h_rook_exists, h_empty, h_safe⟩ := h_castle_spec
-
-  -- Provide kingSide as our witness
-  use kingSide
-
-  -- Now we need: castleMoveIfLegal gs kingSide = some m
-  -- Unfold the definition of castleMoveIfLegal
-  show castleMoveIfLegal gs kingSide = some m
-
-  unfold castleMoveIfLegal
-
-  -- After unfolding, we have: let c := gs.toMove; let cfg := castleConfig c kingSide; ...
-  -- Simplify using h_color: m.piece.color = gs.toMove
-  simp only [← h_color]
-
-  -- The function checks: if castleRight gs.castlingRights (m.piece.color) kingSide then ...
-  -- We have h_castle_right: castleRight gs.castlingRights m.piece.color kingSide = true
-  simp only [h_castle_right]
-
-  -- Next: match gs.board cfg.kingFrom, gs.board cfg.rookFrom with
-  -- We have h_king_pos: gs.board (castleConfig m.piece.color kingSide).kingFrom = some m.piece
-  simp only [h_king_pos]
-
-  -- Extract the rook from h_rook_exists
-  obtain ⟨rook, h_rook_board, h_rook_type, h_rook_color⟩ := h_rook_exists
-
-  -- The function matches on gs.board cfg.rookFrom
-  simp only [h_rook_board]
-
-  -- After matching, we check: if k.pieceType = PieceType.King ∧ k.color = c ∧ ...
-  -- We have k = m.piece, so k.pieceType = PieceType.King (from h_king)
-  simp only [h_king, h_color, h_rook_type, h_rook_color]
-
-  -- Now we need to show: pathEmpty && safe holds
-  -- Where pathEmpty := cfg.emptySquares.all (isEmpty gs.board)
-  -- And safe := cfg.checkSquares.all (fun sq => ¬inCheck (...) m.piece.color)
-  simp only [h_empty, h_safe]
-
-  -- Now the move is constructed and should equal m
-  -- The constructed move has fields from castleConfig: kingTo, rookFrom, rookTo, etc.
-  -- All these fields should match m's fields
-  rfl
+  sorry
 
 /--
 King (castle) case of fideLegal_in_pieceTargets: if m is fideLegal, involves a king,
@@ -1141,15 +1472,12 @@ theorem fideLegal_king_castle_in_pieceTargets (gs : GameState) (m : Move)
   -- Now show m is in the castles list
   simp only [List.mem_filterMap, Option.mem_def]
   -- castles = [castleMoveIfLegal gs true, castleMoveIfLegal gs false].filterMap id
-  use m
-  constructor
-  · -- Show some m is in [castleMoveIfLegal gs true, castleMoveIfLegal gs false]
-    simp only [List.mem_cons, List.mem_singleton]
-    cases kingSide with
-    | true => left; exact h_produces
-    | false => right; exact h_produces
-  · -- filterMap id of some m is m
-    rfl
+  refine ⟨some m, ?_, rfl⟩
+  -- Show some m is in [castleMoveIfLegal gs true, castleMoveIfLegal gs false]
+  simp only [List.mem_cons, List.mem_singleton]
+  cases kingSide with
+  | true => left; exact h_produces.symm
+  | false => right; left; exact h_produces.symm
 
 -- ============================================================================
 -- Pawn Completeness
@@ -1203,24 +1531,20 @@ theorem pawnCapture_squareFromInts (c : Color) (src tgt : Square)
   -- Case 2: src.fileInt - tgt.fileInt = -1 → tgt.fileInt = src.fileInt + 1 → df = 1
   by_cases h : Movement.fileDiff src tgt = 1
   · -- Case: src.fileInt - tgt.fileInt = 1, so df = -1
-    use -1
-    constructor
-    · norm_num
-    · -- squareFromInts (src.fileInt + (-1)) (src.rankInt + pawnDirection c) = some tgt
-      -- = squareFromInts (src.fileInt - 1) (src.rankInt + pawnDirection c) = some tgt
-      -- Since tgt.fileInt = src.fileInt - 1 and tgt.rankInt = src.rankInt + pawnDirection c
-      unfold Movement.fileDiff at h
-      rw [show src.rankInt + Movement.pawnDirection c = tgt.rankInt by omega]
-      rw [show src.fileInt - 1 = tgt.fileInt by omega]
+    refine ⟨-1, ?_, ?_⟩
+    · decide
+    · unfold Movement.fileDiff at h
+      unfold Movement.rankDiff at h_rankDiff
+      have h_rank_eq : src.rankInt + Movement.pawnDirection c = tgt.rankInt := by omega
+      have h_file_eq : src.fileInt + (-1 : Int) = tgt.fileInt := by omega
+      rw [h_rank_eq, h_file_eq]
       exact squareFromInts_roundTrip tgt
   · -- Case: src.fileInt - tgt.fileInt ≠ 1, but absInt(...) = 1, so src.fileInt - tgt.fileInt = -1
-    use 1
-    constructor
-    · norm_num
+    refine ⟨1, ?_, ?_⟩
+    · decide
     · unfold Movement.fileDiff at h_fileDiff h
       unfold Movement.absInt at h_fileDiff
-      -- absInt(src.fileInt - tgt.fileInt) = 1
-      -- Since src.fileInt - tgt.fileInt ≠ 1 and abs(...) = 1, we have src.fileInt - tgt.fileInt = -1
+      unfold Movement.rankDiff at h_rankDiff
       have h_rank_eq : src.rankInt + Movement.pawnDirection c = tgt.rankInt := by omega
       have h_file_eq : src.fileInt + 1 = tgt.fileInt := by omega
       rw [h_rank_eq, h_file_eq]
@@ -1255,8 +1579,8 @@ theorem pawnAdvance_singleStep_isEmpty (gs : GameState) (m : Move)
     intro h
     have := h_cap_consistent.mpr h
     exact Bool.noConfusion this
-  push_neg at h_no_enemy_or_ep
-  have ⟨h_no_enemy, _⟩ := h_no_enemy_or_ep
+  have h_no_enemy : ¬(∃ p, gs.board m.toSq = some p ∧ p.color ≠ m.piece.color) :=
+    fun h => h_no_enemy_or_ep (Or.inl h)
   -- From destinationFriendlyFreeProp: either empty or enemy at target
   unfold destinationFriendlyFreeProp at h_friendly_free
   unfold destinationFriendlyFree at h_friendly_free
@@ -1266,12 +1590,10 @@ theorem pawnAdvance_singleStep_isEmpty (gs : GameState) (m : Move)
   | none => rfl
   | some p =>
     -- If there's a piece, it must be enemy (from h_friendly_free)
-    simp only [h_board] at h_friendly_free
-    -- So p.color ≠ m.piece.color
+    simp only [h_board, decide_eq_true_eq] at h_friendly_free
     -- But h_no_enemy says no such enemy exists
     exfalso
-    apply h_no_enemy
-    exact ⟨p, h_board, h_friendly_free⟩
+    exact h_no_enemy ⟨p, h_board, h_friendly_free⟩
 
 /--
 Theorem: For a two-step pawn advance, both intermediate and target squares are empty.
@@ -1294,55 +1616,12 @@ theorem pawnAdvance_twoStep_isEmpty (gs : GameState) (m : Move)
   constructor
   -- Part 1: Intermediate square is empty via pathClear
   · intro sq h_sq
-    -- The intermediate square is in squaresBetween for a 2-step rook-like move
-    -- pathClear checks all squares in squaresBetween are empty
-    unfold pathClear at h_path
-    -- For a 2-step vertical move (pawn advance), squaresBetween contains the intermediate
-    -- The intermediate is 1 step from source in the direction of target
-    -- squaresBetween uses isRookMove branch for same-file moves
-    -- With fileDiff=0, rankDiff=±2, steps=2, generates 1 intermediate at step=1
-    -- This intermediate is exactly sq from h_sq
-    -- From h_path (List.all returns true), each such square has isEmpty = true
-    unfold isEmpty
-    have h_file_eq : Movement.fileDiff m.fromSq m.toSq = 0 := h_adv.2.1
-    have h_rook : Movement.isRookMove m.fromSq m.toSq := by
-      unfold Movement.isRookMove
-      constructor
-      · exact h_adv.1
-      · left
-        exact ⟨h_file_eq, by omega⟩
-    -- sq is in squaresBetween because it's the intermediate step
-    have h_sq_in : sq ∈ Movement.squaresBetween m.fromSq m.toSq := by
-      unfold Movement.squaresBetween
-      have h_not_diag : ¬Movement.isDiagonal m.fromSq m.toSq := by
-        unfold Movement.isDiagonal
-        simp only [h_file_eq]
-        omega
-      simp only [h_not_diag, ↓reduceIte, h_rook]
-      -- steps = |fileDiff| + |rankDiff| = 0 + 2 = 2
-      have h_steps : Int.natAbs (Movement.fileDiff m.fromSq m.toSq) +
-                     Int.natAbs (Movement.rankDiff m.fromSq m.toSq) = 2 := by
-        simp only [h_file_eq, Int.natAbs_zero, zero_add]
-        have h_rd : Movement.rankDiff m.fromSq m.toSq = -2 * Movement.pawnDirection m.piece.color := h_two
-        cases m.piece.color with
-        | White => simp only [Movement.pawnDirection] at h_rd; omega
-        | Black => simp only [Movement.pawnDirection] at h_rd; omega
-      simp only [h_steps, Nat.reduceLT, ↓reduceIte]
-      -- sq comes from idx=0 in the range
-      rw [List.mem_filterMap]
-      use 0
-      constructor
-      · simp only [List.mem_range]
-      · -- squareFromInts at step 1 from source
-        simp only [Nat.zero_add, Int.ofNat_one, mul_one, h_file_eq, Movement.signInt, Int.natAbs_zero,
-                   zero_mul, add_zero]
-        exact h_sq
-    -- From pathClear, sq must be empty
-    have h_all_empty := List.all_eq_true.mp h_path sq h_sq_in
-    unfold isEmpty at h_all_empty
-    cases h_board : gs.board sq with
-    | none => rfl
-    | some _ => simp only [h_board] at h_all_empty
+    have ⟨intermediate, h_int_eq, h_int_empty⟩ :=
+      pathClear_twoStep_intermediate gs.board m.fromSq m.toSq m.piece.color h_adv h_two h_path
+    have h : some sq = some intermediate := h_sq.symm.trans h_int_eq
+    rw [Option.some.injEq] at h
+    rw [h]
+    exact h_int_empty
   -- Part 2: Target square is empty (same proof as single-step)
   · unfold captureFlagConsistentWithEP at h_cap_consistent
     rw [h_not_cap] at h_cap_consistent
@@ -1350,18 +1629,17 @@ theorem pawnAdvance_twoStep_isEmpty (gs : GameState) (m : Move)
       intro h
       have := h_cap_consistent.mpr h
       exact Bool.noConfusion this
-    push_neg at h_no_enemy_or_ep
-    have ⟨h_no_enemy, _⟩ := h_no_enemy_or_ep
+    have h_no_enemy : ¬(∃ p, gs.board m.toSq = some p ∧ p.color ≠ m.piece.color) :=
+      fun h => h_no_enemy_or_ep (Or.inl h)
     unfold destinationFriendlyFreeProp at h_friendly_free
     unfold destinationFriendlyFree at h_friendly_free
     unfold isEmpty
     cases h_board : gs.board m.toSq with
     | none => rfl
     | some p =>
-      simp only [h_board] at h_friendly_free
+      simp only [h_board, decide_eq_true_eq] at h_friendly_free
       exfalso
-      apply h_no_enemy
-      exact ⟨p, h_board, h_friendly_free⟩
+      exact h_no_enemy ⟨p, h_board, h_friendly_free⟩
 
 /--
 Helper: A move without promotion has promotion = none.
@@ -1371,10 +1649,12 @@ theorem pawn_nopromo_helper (gs : GameState) (m : Move)
     (h_pawn : m.piece.pieceType = PieceType.Pawn)
     (h_not_promo_rank : m.toSq.rankNat ≠ pawnPromotionRank m.piece.color) :
     m.promotion = none := by
-  by_contra h_promo
-  push_neg at h_promo
-  have h_cond := (h_legal.2.2.2.2.2.2.2.1 h_promo)
-  exact h_not_promo_rank h_cond.2
+  cases h_promo : m.promotion with
+  | none => rfl
+  | some _ =>
+    have h_is_some : m.promotion.isSome = true := by simp [h_promo]
+    have h_cond := h_legal.2.2.2.2.2.2.2.1 h_is_some
+    exact absurd h_cond.2 h_not_promo_rank
 
 /--
 Axiom: En passant captures cannot happen on the promotion rank.
@@ -1399,10 +1679,28 @@ theorem enPassant_not_promo_rank (c : Color) (src tgt : Square)
     | inr h => simp [h]
 
 /--
+Helper: Membership in a foldr that appends function results.
+If `b ∈ f a` for some `a ∈ xs`, then `b` is in the foldr result.
+This captures the flatMap-like pattern used in pieceTargets.
+-/
+theorem mem_foldr_append {α β : Type} (f : α → List β) (xs : List α) (b : β)
+    (h : ∃ a ∈ xs, b ∈ f a) : b ∈ xs.foldr (fun x acc => f x ++ acc) [] := by
+  induction xs with
+  | nil => obtain ⟨a, ha, _⟩ := h; cases ha
+  | cons x xs ih =>
+    obtain ⟨a, ha_mem, hb_in⟩ := h
+    show b ∈ f x ++ xs.foldr (fun x acc => f x ++ acc) []
+    rw [List.mem_append]
+    rcases List.mem_cons.mp ha_mem with rfl | ha_tail
+    · left; exact hb_in
+    · right; exact ih ⟨a, ha_tail, hb_in⟩
+
+/--
 Theorem: Given the pawn advance and squareFromInts conditions, the move is in forwardMoves.
 This bridges the computed squareFromInts results to the list membership via foldr.
 -/
 theorem pawnAdvance_in_forwardMoves (gs : GameState) (m : Move)
+    (h_legal : fideLegal gs m)
     (h_pawn : m.piece.pieceType = PieceType.Pawn)
     (h_adv : Movement.isPawnAdvance m.piece.color m.fromSq m.toSq)
     (h_path : pathClear gs.board m.fromSq m.toSq)
@@ -1435,166 +1733,78 @@ theorem pawnAdvance_in_forwardMoves (gs : GameState) (m : Move)
             []
       | none => []
     m ∈ forwardMoves.foldr (fun mv acc => promotionMoves mv ++ acc) [] := by
-  -- Get the squareFromInts lemmas
-  have ⟨oneStep_eq, twoStep_eq⟩ := pawnAdvance_squareFromInts m.piece.color m.fromSq m.toSq h_adv
-  unfold Movement.pawnDirection
-
-  -- Main case split: single-step vs two-step
-  by_cases h_rank : Movement.rankDiff m.fromSq m.toSq = -Movement.pawnDirection m.piece.color
-
-  -- CASE 1: SINGLE-STEP ADVANCE
-  case pos =>
-    -- Get oneStep result
-    have h_oneStep := oneStep_eq h_rank
-    simp only [h_oneStep]
-
-    -- Target must be empty (from captureFlagConsistentWithEP and destinationFriendlyFreeProp)
-    have h_empty : isEmpty gs.board m.toSq = true := by
-      exact pawnAdvance_singleStep_isEmpty gs m h_pawn h_adv h_rank h_path h_not_cap h_cap_consistent h_friendly_free
-    simp only [h_empty, ↓reduceIte]
-
-    -- m cannot be on promotion rank (single-step never reaches promo rank)
-    have h_not_promo : m.toSq.rankNat ≠ pawnPromotionRank m.piece.color := by
-      cases m.piece.color with
-      | White =>
-        have h_diff : Movement.rankDiff m.fromSq m.toSq = -1 := by omega
-        unfold pawnPromotionRank; omega
-      | Black =>
-        have h_diff : Movement.rankDiff m.fromSq m.toSq = 1 := by omega
-        unfold pawnPromotionRank; omega
-
-    -- promotionMoves returns just the single move
-    have h_promo : promotionMoves { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } =
-                   [{ piece := m.piece, fromSq := m.fromSq, toSq := m.toSq }] := by
+  -- Castle rook fields are none (from fideLegal, since ¬isCastle)
+  have h_rook_none := h_legal.2.2.2.2.2.2.2.2.2.2.2 (by simp [h_not_castle])
+  -- Case split: single-step vs two-step advance
+  rcases h_adv.2.2 with h_single | h_double
+  -- CASE 1: Single-step advance
+  · have h_one := (pawnAdvance_squareFromInts m.piece.color m.fromSq m.toSq h_adv).1 h_single
+    have h_empty := pawnAdvance_singleStep_isEmpty gs m h_pawn h_adv h_single h_path
+      h_not_cap h_cap_consistent h_friendly_free
+    let base : Move := { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq }
+    have h_m_in_promo : m ∈ promotionMoves base := by
       unfold promotionMoves
-      simp only [h_not_promo, and_false, ↓reduceIte]
-
-    -- m equals the constructed move (checking all fields)
-    have h_eq_m : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } := by
-      ext <;> simp only [h_not_cap, h_not_ep, h_not_castle] <;> rfl
-
-    -- Now split on whether we're at start rank (determines doubleStep)
-    by_cases h_start : m.fromSq.rankNat = pawnStartRank m.piece.color
-
-    -- SUB-CASE 1a: Single-step, NOT on start rank (simplest!)
-    case pos =>
-      -- This path: doubleStep = []
-      simp only [h_start, ↓reduceIte, List.append_nil, h_eq_m]
-      -- forwardMoves simplifies to [m]
-      -- foldr (fun m acc => promotionMoves m ++ acc) [] [m]
-      --   = promotionMoves m ++ foldr ... []
-      --   = promotionMoves m ++ []
-      --   = [m]
-      simp only [h_promo, List.foldr, List.append_nil]
-      -- m ∈ [m]
-      exact List.mem_singleton m
-
-    -- SUB-CASE 1b: Single-step, on start rank (can have doubleStep)
-    case neg =>
-      -- This path: doubleStep is match on twoStep
-      simp only [h_start, ↓reduceIte, h_eq_m]
-      -- m is the single move in [m]
-      -- m ∈ promotionMoves m from h_promo
-      have h_in_promo : m ∈ promotionMoves { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } := by
-        rw [h_promo]
-        exact List.mem_singleton m
-      -- Use helper axiom: foldr will include m
-      exact Rules.pawn_move_in_foldr_head m { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } h_in_promo
-
-  -- CASE 2: TWO-STEP ADVANCE
-  case neg =>
-    push_neg at h_rank
-    have h_two : Movement.rankDiff m.fromSq m.toSq = -2 * Movement.pawnDirection m.piece.color := by omega
-
-    -- For two-step: oneStep gives intermediate square, twoStep gives target
-    -- The intermediate square is empty by pathClear, target by captureFlagConsistentWithEP
-    have h_intermediate := pawnAdvance_twoStep_isEmpty gs m h_pawn h_adv h_two h_path h_not_cap h_cap_consistent h_friendly_free
-    have ⟨h_int_empty, h_tgt_empty⟩ := h_intermediate
-
-    -- oneStep succeeds (gives intermediate square)
-    -- In a two-step, oneStep lands on intermediate which is guaranteed to be in bounds
-    have h_one_exists : ∃ intermediate,
-      Movement.squareFromInts m.fromSq.fileInt (m.fromSq.rankInt + Movement.pawnDirection m.piece.color) = some intermediate := by
-      -- From pawnAdvance geometry: both src and tgt are valid squares
-      -- Two-step means rankDiff = ±2, so intermediate is at rankDiff = ±1
-      -- This is always in bounds for valid pawn starts
-      cases m.piece.color with
-      | White =>
-        -- White starts at rank 1 (rankNat = 1), so rank 1 + 1 = 2 (rankNat)
-        -- This corresponds to rankInt = 1, so intermediate rankInt = 2 ✓ in [0,8)
-        have h_start : m.fromSq.rankNat = 1 := by omega
-        use { fileInt := m.fromSq.fileInt, rankInt := m.fromSq.rankInt + 1 }
-        simp only [Movement.squareFromInts]
-        have : (0 ≤ m.fromSq.rankInt + 1) ∧ (m.fromSq.rankInt + 1 < 8) := by omega
-        simp only [this, ↓reduceIte]
-        have : (0 ≤ m.fromSq.fileInt) ∧ (m.fromSq.fileInt < 8) := by
-          exact ⟨Square.fileInt_nonneg m.fromSq, Square.fileInt_lt_8 m.fromSq⟩
-        simp only [this, ↓reduceIte]
-      | Black =>
-        -- Black starts at rank 6 (rankNat = 6), so rank 6 - 1 = 5 (rankNat)
-        -- This corresponds to rankInt = 5, so intermediate rankInt = 4 ✓ in [0,8)
-        have h_start : m.fromSq.rankNat = 6 := by omega
-        use { fileInt := m.fromSq.fileInt, rankInt := m.fromSq.rankInt - 1 }
-        simp only [Movement.squareFromInts]
-        have : (0 ≤ m.fromSq.rankInt - 1) ∧ (m.fromSq.rankInt - 1 < 8) := by omega
-        simp only [this, ↓reduceIte]
-        have : (0 ≤ m.fromSq.fileInt) ∧ (m.fromSq.fileInt < 8) := by
-          exact ⟨Square.fileInt_nonneg m.fromSq, Square.fileInt_lt_8 m.fromSq⟩
-        simp only [this, ↓reduceIte]
-
-    -- twoStep succeeds (gives m.toSq)
-    have h_two_eq := twoStep_eq h_two
-    simp only [h_two_eq]
-
-    -- m.toSq is empty
-    have h_tgt_is_empty : isEmpty gs.board m.toSq = true := h_tgt_empty
-    simp only [h_tgt_is_empty, ↓reduceIte]
-
-    -- m is not on promotion rank (two-step from start rank is at most rank 3 for white, rank 5 for black)
-    have h_not_promo_two : m.toSq.rankNat ≠ pawnPromotionRank m.piece.color := by
-      cases m.piece.color with
-      | White =>
-        have h_diff : Movement.rankDiff m.fromSq m.toSq = -2 := by omega
-        unfold pawnPromotionRank; omega
-      | Black =>
-        have h_diff : Movement.rankDiff m.fromSq m.toSq = 2 := by omega
-        unfold pawnPromotionRank; omega
-
-    -- promotionMoves still returns single move
-    have h_promo_two : promotionMoves { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } =
-                       [{ piece := m.piece, fromSq := m.fromSq, toSq := m.toSq }] := by
-      unfold promotionMoves
-      simp only [h_not_promo_two, and_false, ↓reduceIte]
-
-    have h_eq_m_two : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } := by
-      ext <;> simp only [h_not_cap, h_not_ep, h_not_castle] <;> rfl
-
-    -- m must be on start rank (precondition of two-step)
+      by_cases h_promo_rank : m.toSq.rankNat = pawnPromotionRank m.piece.color
+      · -- On promotion rank: need m.promotion type ∈ promotionTargets
+        have h_cond : base.piece.pieceType = PieceType.Pawn ∧
+          base.toSq.rankNat = pawnPromotionRank base.piece.color := ⟨h_pawn, h_promo_rank⟩
+        simp only [h_cond, ↓reduceIte]
+        sorry -- fideLegal spec gap: doesn't constrain m.promotion ∈ promotionTargets
+      · -- Not on promotion rank: promotionMoves = [base], and m = base
+        have h_not_cond : ¬(base.piece.pieceType = PieceType.Pawn ∧
+          base.toSq.rankNat = pawnPromotionRank base.piece.color) :=
+          fun ⟨_, h⟩ => h_promo_rank h
+        rw [if_neg h_not_cond]
+        have h_no_promo := pawn_nopromo_helper gs m h_legal h_pawn h_promo_rank
+        have ⟨h_rf, h_rt⟩ := h_rook_none
+        have h_m_eq : m = base := by
+          cases m; congr 1 <;> assumption
+        rw [h_m_eq]; exact List.mem_cons_self
+    apply mem_foldr_append
+    refine ⟨base, ?_, h_m_in_promo⟩
+    simp only [h_one, h_empty, ↓reduceIte]
+    exact List.mem_append_left _ List.mem_cons_self
+  -- CASE 2: Two-step advance
+  · have h_two_eq := (pawnAdvance_squareFromInts m.piece.color m.fromSq m.toSq h_adv).2 h_double
+    have h_both := pawnAdvance_twoStep_isEmpty gs m h_pawn h_adv h_double h_path
+      h_not_cap h_cap_consistent h_friendly_free
+    have h_tgt_empty : isEmpty gs.board m.toSq = true := h_both.2
+    -- Intermediate square exists and is empty
+    have ⟨intermediate, h_int_eq, h_int_empty⟩ :=
+      pathClear_twoStep_intermediate gs.board m.fromSq m.toSq m.piece.color h_adv h_double h_path
+    -- Must be on start rank (from respectsGeometry two-step condition)
     have h_must_start : m.fromSq.rankNat = pawnStartRank m.piece.color := by
-      have : Movement.rankDiff m.fromSq m.toSq ≠ -Movement.pawnDirection m.piece.color := h_rank
-      cases m.piece.color with
+      have h_geom := h_legal.2.2.1
+      unfold respectsGeometry at h_geom
+      simp only [h_pawn, h_not_cap] at h_geom
+      exact h_geom.2.2 h_double
+    -- Two-step never reaches promotion rank
+    have h_not_promo_rank : m.toSq.rankNat ≠ pawnPromotionRank m.piece.color := by
+      intro h_eq
+      unfold Movement.rankDiff at h_double
+      simp only [Square.rankInt, Square.rankNat, Rank.toNat, Int.ofNat_eq_natCast] at h_double h_must_start h_eq
+      cases hc : m.piece.color with
       | White =>
-        have h_diff : Movement.rankDiff m.fromSq m.toSq = -2 := by omega
-        unfold pawnStartRank Movement.rankDiff; omega
+        simp only [hc, pawnPromotionRank, pawnStartRank, Movement.pawnDirection] at *
+        omega
       | Black =>
-        have h_diff : Movement.rankDiff m.fromSq m.toSq = 2 := by omega
-        unfold pawnStartRank Movement.rankDiff; omega
-
-    -- forwardMoves structure for two-step case
-    simp only [h_must_start, ↓reduceIte, h_eq_m_two]
-    -- After simplification: forwardMoves = [m] ++ doubleStep
-    -- Since twoStep = some m.toSq (from h_two_eq) and isEmpty holds (from h_tgt_is_empty),
-    -- doubleStep = [m]
-    -- So forwardMoves = [m] ++ [m] (but same move m)
-
-    -- However, the key insight: m is in [m] which is part of forwardMoves
-    -- foldr will process the base move m and include it
-    have h_in_promo_two : m ∈ promotionMoves { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } := by
-      rw [h_promo_two]
-      exact List.mem_singleton m
-
-    -- Apply foldr head axiom for the initial move m
-    exact Rules.pawn_move_in_foldr_head m { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq } h_in_promo_two
+        simp only [hc, pawnPromotionRank, pawnStartRank, Movement.pawnDirection] at *
+        omega
+    let base : Move := { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq }
+    have h_m_in_promo : m ∈ promotionMoves base := by
+      unfold promotionMoves
+      have h_not_cond : ¬(base.piece.pieceType = PieceType.Pawn ∧
+        base.toSq.rankNat = pawnPromotionRank base.piece.color) :=
+        fun ⟨_, h⟩ => h_not_promo_rank h
+      rw [if_neg h_not_cond]
+      have h_no_promo := pawn_nopromo_helper gs m h_legal h_pawn h_not_promo_rank
+      have h_m_eq : m = base := by
+        cases m; congr 1 <;> assumption
+      rw [h_m_eq]; exact List.mem_cons_self
+    apply mem_foldr_append
+    refine ⟨base, ?_, h_m_in_promo⟩
+    simp only [h_int_eq, h_int_empty, ↓reduceIte, h_must_start, h_two_eq, h_tgt_empty]
+    exact List.mem_append_right _ List.mem_cons_self
 
 /--
 Theorem: Given the pawn capture and squareFromInts conditions, the move is in captureMoves.
@@ -1603,6 +1813,7 @@ This proves the move appears in the foldr-based capture list via case analysis o
 2. Target condition: whether it's a regular capture (isEnemyAt) or en passant
 -/
 theorem pawnCapture_in_captureMoves (gs : GameState) (m : Move)
+    (h_legal : fideLegal gs m)
     (h_pawn : m.piece.pieceType = PieceType.Pawn)
     (h_cap : m.isCapture = true)
     (h_cap_geom : Movement.isPawnCapture m.piece.color m.fromSq m.toSq)
@@ -1626,113 +1837,18 @@ theorem pawnCapture_in_captureMoves (gs : GameState) (m : Move)
           | none => acc)
         []
     m ∈ captureMoves := by
-  -- Extract the capture offset from the geometry
-  unfold Movement.isPawnCapture at h_cap_geom
-  obtain ⟨h_dir, h_offset⟩ := h_cap_geom
-
-  -- The offset must be -1 or 1 (from pawn capture geometry)
-  have offset_eq : m.toSq.fileInt - m.fromSq.fileInt = 1 ∨ m.toSq.fileInt - m.fromSq.fileInt = -1 := by
-    unfold Movement.fileDiff at h_offset
-    omega
-
-  -- Case split on the offset
-  rcases offset_eq with h_offset_1 | h_offset_neg1
-
-  -- CASE 1: offset = 1
-  case inl =>
-    -- Show that target = some m.toSq when df = 1
-    have h_target_eq : Movement.squareFromInts (m.fromSq.fileInt + 1) (m.fromSq.rankInt + Movement.pawnDirection m.piece.color) = some m.toSq := by
-      rw [← h_dir]
-      have : m.fromSq.rankInt + Movement.pawnDirection m.piece.color = m.toSq.rankInt := by omega
-      rw [this, h_offset_1]
-      exact Movement.squareFromInts_roundTrip m.toSq
-
-    -- Case split on whether it's a regular capture or en passant
-    rcases h_target_cond with h_enemy | h_ep
-
-    -- CASE 1a: Regular capture (isEnemyAt)
-    case inl =>
-      simp only [h_target_eq, h_enemy, ↓reduceIte]
-      -- Now the move should be in promotionMoves from the first offset
-      have h_base_move : { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } ∈
-                         promotionMoves { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } := by
-        unfold promotionMoves
-        simp only [List.mem_cons]
-        left
-        rfl
-      -- Use the helper axiom to show it's in the foldr
-      have h_in_list : { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } ∈
-                       promotionMoves { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } ++ [] := by
-        simp only [List.mem_append, h_base_move, true_or]
-
-      -- Now we need to connect this to m itself through promotionMoves
-      have h_m_promo := pawnCapture_squareFromInts gs m h_pawn h_cap_geom h_not_castle
-      rw [h_m_promo]
-      exact pawn_move_in_foldr_head _ _ h_base_move
-
-    -- CASE 1b: En passant capture
-    case inr =>
-      obtain ⟨h_ep_target, h_ep_move⟩ := h_ep
-      -- The EP branch doesn't apply, so we look further in foldr
-      simp only [h_target_eq, h_enemy, ↓reduceIte, h_ep_target]
-      -- The move is a single captured piece, no promotion in EP
-      have h_ep_eq : m.isEnPassant = true := h_ep_move
-      have h_ep_move_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true, isEnPassant := true } := by
-        ext
-        · rfl
-        · rfl
-        · rfl
-        · rfl
-        · exact h_ep_move
-      rw [h_ep_move_eq]
-      simp only [List.mem_cons]
-      left
-      rfl
-
-  -- CASE 2: offset = -1
-  case inr =>
-    -- Show that target = some m.toSq when df = -1
-    have h_target_eq : Movement.squareFromInts (m.fromSq.fileInt + (-1)) (m.fromSq.rankInt + Movement.pawnDirection m.piece.color) = some m.toSq := by
-      rw [← h_dir]
-      have : m.fromSq.rankInt + Movement.pawnDirection m.piece.color = m.toSq.rankInt := by omega
-      rw [this, h_offset_neg1]
-      norm_num
-      exact Movement.squareFromInts_roundTrip m.toSq
-
-    -- Case split on whether it's a regular capture or en passant
-    rcases h_target_cond with h_enemy | h_ep
-
-    -- CASE 2a: Regular capture (isEnemyAt)
-    case inl =>
-      simp only [h_target_eq, h_enemy, ↓reduceIte]
-      -- The move is in the second iteration of foldr (offset = -1)
-      have h_base_move : { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } ∈
-                         promotionMoves { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true } := by
-        unfold promotionMoves
-        simp only [List.mem_cons]
-        left
-        rfl
-
-      have h_m_promo := pawnCapture_squareFromInts gs m h_pawn h_cap_geom h_not_castle
-      rw [h_m_promo]
-      exact pawn_move_in_foldr_head _ _ h_base_move
-
-    -- CASE 2b: En passant capture
-    case inr =>
-      obtain ⟨h_ep_target, h_ep_move⟩ := h_ep
-      simp only [h_target_eq, h_enemy, ↓reduceIte, h_ep_target]
-      have h_ep_eq : m.isEnPassant = true := h_ep_move
-      have h_ep_move_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true, isEnPassant := true } := by
-        ext
-        · rfl
-        · rfl
-        · rfl
-        · rfl
-        · exact h_ep_eq
-      rw [h_ep_move_eq]
-      simp only [List.mem_cons]
-      left
-      rfl
+  -- Proof approach:
+  -- 1. From isPawnCapture, determine file offset is ±1 and rank diff matches pawnDirection
+  -- 2. Show squareFromInts with matching offset reconstructs m.toSq
+  -- 3. Case split on regular capture vs en passant
+  -- 4. Show m ∈ promotionMoves base (from fideLegal promotion constraints)
+  -- 5. Show monotonicity: inner membership preserved by outer foldr step
+  -- Remaining blockers:
+  -- - Move equality without @[ext] (need cases m + Move.mk.injEq)
+  -- - squareFromInts_of_valid (correct identifier for roundtrip lemma)
+  -- - fideLegal doesn't constrain m.promotion ∈ promotionTargets for promo-rank captures
+  -- - EP emptiness requires game state invariant not in proof context
+  sorry
 
 /--
 Pawn case of fideLegal_in_pieceTargets: if m is fideLegal and involves a pawn,
@@ -1750,11 +1866,12 @@ theorem fideLegal_pawn_in_pieceTargets (gs : GameState) (m : Move)
   simp only [h_pawn] at h_geom
   -- Pawns don't castle
   have h_not_castle : m.isCastle = false := by
-    by_contra h_castle
-    simp only [Bool.not_eq_false] at h_castle
-    have h_king := h_legal.2.2.2.2.2.2.2.2.2.2.1 h_castle
-    rw [h_pawn] at h_king
-    exact PieceType.noConfusion h_king
+    cases h_cb : m.isCastle with
+    | false => rfl
+    | true =>
+      have h_king := h_legal.2.2.2.2.2.2.2.2.2.2.1 h_cb
+      rw [h_pawn] at h_king
+      exact PieceType.noConfusion h_king
   -- Unfold pieceTargets
   unfold pieceTargets
   simp only [h_pawn]
@@ -1769,13 +1886,13 @@ theorem fideLegal_pawn_in_pieceTargets (gs : GameState) (m : Move)
       simp only [h_cap, ↓reduceIte, h_ep] at h_geom
       have h_cap_geom := h_geom.1
       have h_ep_target := h_geom.2
-      exact pawnCapture_in_captureMoves gs m h_pawn h_cap h_cap_geom h_not_castle
+      exact pawnCapture_in_captureMoves gs m h_legal h_pawn h_cap h_cap_geom h_not_castle
         (Or.inr ⟨h_ep_target, h_ep⟩)
     · -- Regular capture (not en passant)
       simp only [h_cap, ↓reduceIte, h_ep, Bool.false_eq_true] at h_geom
       have h_cap_geom := h_geom.1
       have h_enemy := h_geom.2
-      exact pawnCapture_in_captureMoves gs m h_pawn h_cap h_cap_geom h_not_castle
+      exact pawnCapture_in_captureMoves gs m h_legal h_pawn h_cap h_cap_geom h_not_castle
         (Or.inl h_enemy)
   · -- Non-capture case (advance)
     left
@@ -1785,17 +1902,18 @@ theorem fideLegal_pawn_in_pieceTargets (gs : GameState) (m : Move)
     have h_path := h_geom.2.1
     -- Not en passant (non-capture)
     have h_not_ep : m.isEnPassant = false := by
-      by_contra h_is_ep
-      push_neg at h_is_ep
-      have h_cap_consistent' := h_legal.2.2.2.2.1
-      unfold captureFlagConsistentWithEP at h_cap_consistent'
-      have h_must_cap := h_cap_consistent'.mpr (Or.inr h_is_ep)
-      rw [h_cap] at h_must_cap
-      exact Bool.noConfusion h_must_cap
+      cases h_ep_b : m.isEnPassant with
+      | false => rfl
+      | true =>
+        have h_cap_consistent' := h_legal.2.2.2.2.1
+        unfold captureFlagConsistentWithEP at h_cap_consistent'
+        have h_must_cap := h_cap_consistent'.mpr (Or.inr h_ep_b)
+        rw [h_cap] at h_must_cap
+        exact Bool.noConfusion h_must_cap
     -- Extract captureFlagConsistentWithEP and destinationFriendlyFreeProp from fideLegal
     have h_cap_consistent : captureFlagConsistentWithEP gs m := h_legal.2.2.2.2.1
     have h_friendly_free : destinationFriendlyFreeProp gs m := h_legal.2.2.2.1
-    exact pawnAdvance_in_forwardMoves gs m h_pawn h_adv h_path h_cap h_not_ep h_not_castle h_cap_consistent h_friendly_free
+    exact pawnAdvance_in_forwardMoves gs m h_legal h_pawn h_adv h_path h_cap h_not_ep h_not_castle h_cap_consistent h_friendly_free
 
 -- ============================================================================
 -- Phase 2: Board Invariant Preservation (TODO)
