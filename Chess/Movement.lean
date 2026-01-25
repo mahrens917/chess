@@ -33,6 +33,20 @@ instance instDecidableIsQueenMove (source target : Square) : Decidable (isQueenM
 def isKingStep (source target : Square) : Prop :=
   source ≠ target ∧ absInt (fileDiff source target) ≤ 1 ∧ absInt (rankDiff source target) ≤ 1
 
+theorem absInt_neg (x : Int) : absInt (-x) = absInt x := by
+  simp [absInt]; omega
+
+theorem fileDiff_neg (s t : Square) : fileDiff t s = -fileDiff s t := by
+  simp [fileDiff]; omega
+
+theorem rankDiff_neg (s t : Square) : rankDiff t s = -rankDiff s t := by
+  simp [rankDiff]; omega
+
+theorem isKingStep_symm (s t : Square) (h : isKingStep s t) : isKingStep t s := by
+  obtain ⟨hne, hf, hr⟩ := h
+  exact ⟨hne.symm, by rw [fileDiff_neg, absInt_neg]; exact hf,
+         by rw [rankDiff_neg, absInt_neg]; exact hr⟩
+
 def isKnightMove (source target : Square) : Prop :=
   source ≠ target ∧
     ((absInt (fileDiff source target) = 1 ∧ absInt (rankDiff source target) = 2) ∨
@@ -240,6 +254,194 @@ theorem mem_knightTargets_iff (source target : Square) :
   unfold knightTargets
   simp only [List.mem_filter, Square.mem_all, true_and]
   exact isKnightMoveBool_eq_true_iff_isKnightMove source target
+
+/-- Knight moves and king steps are disjoint: if a square is reachable by a knight move,
+    it is not reachable by a king step (and vice versa).
+    This follows because knight moves have L-shaped distance (1,2) or (2,1),
+    while king steps require both file and rank differences ≤ 1. -/
+theorem isKnightMove_not_isKingStep (source target : Square) :
+    isKnightMove source target → ¬ isKingStep source target := by
+  intro hKnight hKing
+  rcases hKnight with ⟨_, (⟨h1, h2⟩ | ⟨h1, h2⟩)⟩
+  · have ⟨_, _, hr⟩ := hKing
+    have h2' : absInt (rankDiff source target) = 2 := h2
+    have hr' : absInt (rankDiff source target) ≤ 1 := hr
+    unfold absInt at h2' hr'
+    split at h2' <;> split at hr' <;> omega
+  · have ⟨_, hf, _⟩ := hKing
+    have h1' : absInt (fileDiff source target) = 2 := h1
+    have hf' : absInt (fileDiff source target) ≤ 1 := hf
+    unfold absInt at h1' hf'
+    split at h1' <;> split at hf' <;> omega
+
+/-- Helper for converting Prop to Bool for isKingStep -/
+theorem not_isKingStep_iff_bool_false (wk bk : Square) :
+    ¬ isKingStep wk bk ↔ isKingStepBool wk bk = false := by
+  rw [(isKingStepBool_eq_true_iff_isKingStep wk bk).symm]
+  cases isKingStepBool wk bk <;> simp
+
+/-- Find first escape square: adjacent to wk but not adjacent to bk -/
+def findEscapeSquare (wk bk : Square) : Option Square :=
+  (kingTargets wk).find? (fun esc => !isKingStepBool bk esc)
+
+/-- All distinct non-adjacent king pairs have an escape square.
+    This is verified by exhaustive enumeration over all 64×64 square pairs. -/
+def allPairsHaveEscape : Bool :=
+  Square.all.all fun wk =>
+    Square.all.all fun bk =>
+      wk = bk || isKingStepBool wk bk || (findEscapeSquare wk bk).isSome
+
+theorem all_non_adjacent_have_escape : allPairsHaveEscape = true := by
+  native_decide
+
+/-- For any two distinct, non-adjacent squares (kings), there exists an escape square
+    that is adjacent to the first but not adjacent to the second.
+    This is the key geometric fact: even in corners (3 adjacent squares),
+    an attacking king at distance ≥2 can block at most 2, leaving at least 1 free. -/
+theorem exists_escape_square (wk bk : Square)
+    (hNe : wk ≠ bk) (hNoAdj : ¬ isKingStep wk bk) :
+    ∃ esc, isKingStep wk esc ∧ ¬ isKingStep bk esc := by
+  have hNoAdjBool : isKingStepBool wk bk = false := (not_isKingStep_iff_bool_false wk bk).1 hNoAdj
+  have h : allPairsHaveEscape = true := all_non_adjacent_have_escape
+  unfold allPairsHaveEscape at h
+  have hwk : wk ∈ Square.all := Square.mem_all wk
+  have hbk : bk ∈ Square.all := Square.mem_all bk
+  have h1 := List.all_eq_true.1 h wk hwk
+  have h2 := List.all_eq_true.1 h1 bk hbk
+  simp only [hNe, hNoAdjBool] at h2
+  cases hFind : findEscapeSquare wk bk with
+  | none => simp [hFind] at h2
+  | some esc =>
+    refine ⟨esc, ?_, ?_⟩
+    · unfold findEscapeSquare at hFind
+      have hMem := List.mem_of_find?_eq_some hFind
+      unfold kingTargets at hMem
+      simp only [List.mem_filter, Square.mem_all, true_and] at hMem
+      exact (isKingStepBool_eq_true_iff_isKingStep wk esc).1 hMem
+    · unfold findEscapeSquare at hFind
+      have hSat := List.find?_some hFind
+      simp only [Bool.not_eq_true'] at hSat
+      exact (not_isKingStep_iff_bool_false bk esc).2 hSat
+
+/-- Find escape square safe from both enemy king and knight attack -/
+def findSafeEscapeFromKnight (dk ek nsq : Square) : Option Square :=
+  (kingTargets dk).find? (fun esc =>
+    !isKingStepBool ek esc && !isKnightMoveBool nsq esc)
+
+/-- All valid K+N vs K configurations have a safe escape.
+    Verified by exhaustive enumeration over all 64³ square combinations. -/
+def allKnightConfigsHaveSafeEscape : Bool :=
+  Square.all.all fun dk =>
+    Square.all.all fun ek =>
+      Square.all.all fun nsq =>
+        dk = ek || isKingStepBool dk ek || !isKnightMoveBool nsq dk ||
+        (findSafeEscapeFromKnight dk ek nsq).isSome
+
+theorem all_knight_configs_have_safe_escape : allKnightConfigsHaveSafeEscape = true := by
+  native_decide
+
+/-- Helper for converting knight move Prop to Bool -/
+theorem not_isKnightMove_iff_bool_false (src tgt : Square) :
+    ¬ isKnightMove src tgt ↔ isKnightMoveBool src tgt = false := by
+  rw [(isKnightMoveBool_eq_true_iff_isKnightMove src tgt).symm]
+  cases isKnightMoveBool src tgt <;> simp
+
+/-- In a K+N vs K position where the defending king (dk) is in check from knight (nsq),
+    and the enemy king (ek) is not adjacent to dk, there exists a safe escape square:
+    adjacent to dk, not adjacent to ek, and not attacked by the knight. -/
+theorem exists_safe_escape_from_knight (dk ek nsq : Square)
+    (hNe : dk ≠ ek) (hNoAdj : ¬ isKingStep dk ek) (hCheck : isKnightMove nsq dk) :
+    ∃ esc, isKingStep dk esc ∧ ¬ isKingStep ek esc ∧ ¬ isKnightMove nsq esc := by
+  have hNoAdjBool : isKingStepBool dk ek = false := (not_isKingStep_iff_bool_false dk ek).1 hNoAdj
+  have hCheckBool : isKnightMoveBool nsq dk = true := (isKnightMoveBool_eq_true_iff_isKnightMove nsq dk).2 hCheck
+  have h : allKnightConfigsHaveSafeEscape = true := all_knight_configs_have_safe_escape
+  unfold allKnightConfigsHaveSafeEscape at h
+  have hdk : dk ∈ Square.all := Square.mem_all dk
+  have hek : ek ∈ Square.all := Square.mem_all ek
+  have hnsq : nsq ∈ Square.all := Square.mem_all nsq
+  have h1 := List.all_eq_true.1 h dk hdk
+  have h2 := List.all_eq_true.1 h1 ek hek
+  have h3 := List.all_eq_true.1 h2 nsq hnsq
+  simp only [hNe, hNoAdjBool, hCheckBool] at h3
+  cases hFind : findSafeEscapeFromKnight dk ek nsq with
+  | none => simp [hFind] at h3
+  | some esc =>
+    refine ⟨esc, ?_, ?_, ?_⟩
+    · unfold findSafeEscapeFromKnight at hFind
+      have hMem := List.mem_of_find?_eq_some hFind
+      unfold kingTargets at hMem
+      simp only [List.mem_filter, Square.mem_all, true_and] at hMem
+      exact (isKingStepBool_eq_true_iff_isKingStep dk esc).1 hMem
+    · unfold findSafeEscapeFromKnight at hFind
+      have hSat := List.find?_some hFind
+      simp only [Bool.and_eq_true, Bool.not_eq_true'] at hSat
+      exact (not_isKingStep_iff_bool_false ek esc).2 hSat.1
+    · unfold findSafeEscapeFromKnight at hFind
+      have hSat := List.find?_some hFind
+      simp only [Bool.and_eq_true, Bool.not_eq_true'] at hSat
+      exact (not_isKnightMove_iff_bool_false nsq esc).2 hSat.2
+
+/-- Find escape square safe from both enemy king and bishop diagonal attack -/
+def findSafeEscapeFromBishop (dk ek bsq : Square) : Option Square :=
+  (kingTargets dk).find? (fun esc =>
+    !isKingStepBool ek esc && !(bsq ≠ esc && isDiagonal bsq esc))
+
+/-- All valid K+B vs K configurations (where bishop gives check) have a safe escape.
+    Verified by exhaustive enumeration. -/
+def allBishopConfigsHaveSafeEscape : Bool :=
+  Square.all.all fun dk =>
+    Square.all.all fun ek =>
+      Square.all.all fun bsq =>
+        dk = ek || isKingStepBool dk ek || !(bsq ≠ dk && isDiagonal bsq dk) ||
+        (findSafeEscapeFromBishop dk ek bsq).isSome
+
+theorem all_bishop_configs_have_safe_escape : allBishopConfigsHaveSafeEscape = true := by
+  native_decide
+
+/-- In a K+B vs K position where the defending king (dk) is in check from bishop (bsq),
+    and the enemy king (ek) is not adjacent to dk, there exists a safe escape square:
+    adjacent to dk, not adjacent to ek, and not attacked by the bishop.
+    Bishops only attack diagonally, so adjacent squares not on bishop's diagonal are safe. -/
+theorem exists_safe_escape_from_bishop (dk ek bsq : Square)
+    (hNe : dk ≠ ek) (hNoAdj : ¬ isKingStep dk ek) (hCheck : bsq ≠ dk ∧ isDiagonal bsq dk) :
+    ∃ esc, isKingStep dk esc ∧ ¬ isKingStep ek esc ∧ ¬ (bsq ≠ esc ∧ isDiagonal bsq esc) := by
+  have hNoAdjBool : isKingStepBool dk ek = false := (not_isKingStep_iff_bool_false dk ek).1 hNoAdj
+  have hCheckBool : (decide (bsq ≠ dk) && decide (isDiagonal bsq dk)) = true := by
+    simp only [decide_eq_true_eq, Bool.and_eq_true]
+    exact ⟨hCheck.1, hCheck.2⟩
+  have h : allBishopConfigsHaveSafeEscape = true := all_bishop_configs_have_safe_escape
+  unfold allBishopConfigsHaveSafeEscape at h
+  have hdk : dk ∈ Square.all := Square.mem_all dk
+  have hek : ek ∈ Square.all := Square.mem_all ek
+  have hbsq : bsq ∈ Square.all := Square.mem_all bsq
+  have h1 := List.all_eq_true.1 h dk hdk
+  have h2 := List.all_eq_true.1 h1 ek hek
+  have h3 := List.all_eq_true.1 h2 bsq hbsq
+  simp only [hNe, hNoAdjBool, hCheckBool, Bool.false_or] at h3
+  cases hFind : findSafeEscapeFromBishop dk ek bsq with
+  | none => simp [hFind] at h3
+  | some esc =>
+    refine ⟨esc, ?_, ?_, ?_⟩
+    · unfold findSafeEscapeFromBishop at hFind
+      have hMem := List.mem_of_find?_eq_some hFind
+      unfold kingTargets at hMem
+      simp only [List.mem_filter, Square.mem_all, true_and] at hMem
+      exact (isKingStepBool_eq_true_iff_isKingStep dk esc).1 hMem
+    · unfold findSafeEscapeFromBishop at hFind
+      have hSat := List.find?_some hFind
+      simp only [Bool.and_eq_true, Bool.not_eq_true'] at hSat
+      exact (not_isKingStep_iff_bool_false ek esc).2 hSat.1
+    · unfold findSafeEscapeFromBishop at hFind
+      have hSat := List.find?_some hFind
+      simp only [Bool.and_eq_true, Bool.not_eq_true', Bool.and_eq_false_iff,
+                 decide_eq_false_iff_not, decide_eq_true_eq] at hSat
+      rcases hSat.2 with hEq | hNotDiag
+      · -- hEq : ¬bsq ≠ esc, goal: ¬(bsq ≠ esc ∧ isDiagonal bsq esc)
+        intro ⟨hNeEsc, _⟩
+        exact hEq hNeEsc
+      · -- hNotDiag : ¬isDiagonal bsq esc, goal: ¬(bsq ≠ esc ∧ isDiagonal bsq esc)
+        intro ⟨_, hDiag⟩
+        exact hNotDiag hDiag
 
 -- ============================================================================
 -- Helper Lemmas for Path Validation

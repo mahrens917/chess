@@ -97,6 +97,11 @@ def basicLegalAndSafe (gs : GameState) (m : Move) : Bool :=
   let next := gs.movePiece m
   basicMoveLegalBool gs m && !(inCheck next.board gs.toMove)
 
+theorem basicLegalAndSafe_implies_basicMoveLegalBool (gs : GameState) (m : Move)
+    (h : basicLegalAndSafe gs m = true) : basicMoveLegalBool gs m = true := by
+  unfold basicLegalAndSafe at h
+  exact (Eq.mp (Bool.and_eq_true _ _) h).1
+
 def isEnemyAt (b : Board) (c : Color) (sq : Square) : Bool :=
   match b sq with
   | some p => p.color ≠ c
@@ -566,10 +571,13 @@ def countNonKingPieces (gs : GameState) : Nat :=
     | some p => if p.pieceType ≠ PieceType.King then acc + 1 else acc
     | none => acc) 0
 
--- Formal definition: no sequence of moves leads to checkmate
--- A position is dead if and only if no sequence of legal moves can reach checkmate
+/-- Formal definition: no sequence of legal moves leads to checkmate.
+    A position is dead if and only if no sequence of legal moves can reach checkmate.
+    We restrict to legal move sequences (via applyLegalMoves) because only reachable
+    positions matter for the FIDE dead position rule. -/
 def isDeadPosition (gs : GameState) : Prop :=
-  ¬∃ (moves : List Move), isCheckmate (applyMoveSequence gs moves)
+  ¬∃ (moves : List Move) (gs' : GameState),
+    applyLegalMoves gs moves = Except.ok gs' ∧ isCheckmate gs' = true
 
 end Rules
 end Chess

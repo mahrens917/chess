@@ -227,6 +227,26 @@ namespace Board
     rw [Array.getElem_setIfInBounds hj]
     simp [hne]
 
+  private theorem array_getElem_idx_eq {a : Array α} {i j : Nat}
+      (hij : i = j) (hi : i < a.size) (hj : j < a.size) :
+      a[i]'hi = a[j]'hj := by subst hij; rfl
+
+  /-- Two boards are equal if they agree on `get` for every square. -/
+  theorem ext_get {b1 b2 : Board} (h : ∀ sq : Square, b1.get sq = b2.get sq) : b1 = b2 := by
+    cases b1 with | mk d1 s1 => ?_
+    cases b2 with | mk d2 s2 => ?_
+    suffices d1 = d2 by subst this; rfl
+    apply Array.ext
+    · omega
+    · intro i hi1 hi2
+      have hsz : i < 64 := by omega
+      have hget := h (Square.fromIndex ⟨i, hsz⟩)
+      simp only [get, Square.fromIndex, Square.toIndex] at hget
+      have heq : i / 8 * 8 + i % 8 = i := by omega
+      rw [array_getElem_idx_eq heq (by omega) hi1,
+          array_getElem_idx_eq heq (by omega) hi2] at hget
+      exact hget
+
   -- Compatibility aliases
   theorem update_eq (b : Board) (sq : Square) (p : Option Piece) :
       (b.update sq p).get sq = p := get_set_eq b sq p

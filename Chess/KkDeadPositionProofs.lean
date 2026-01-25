@@ -19,8 +19,7 @@ theorem finalizeResult_board (before after : GameState) :
     · simp [hMate]
     · simp [hMate]
       let pDraw : Prop :=
-        (((isStalemate after = true ∨ isSeventyFiveMoveDraw after = true) ∨ fivefoldRepetition after = true) ∨
-            insufficientMaterial after = true) ∨
+        ((isStalemate after = true ∨ isSeventyFiveMoveDraw after = true) ∨ fivefoldRepetition after = true) ∨
           deadPosition after = true
       by_cases hP : pDraw <;> simp [pDraw, hP]
 
@@ -136,7 +135,7 @@ theorem KkInv.applyLegalMove_preserved (gs : GameState) (m : Move) (gs' : GameSt
                     none) := by
             -- Castling is impossible on a kings-only board.
             simpa [pieceTargets, kingPiece, hNoCastleTrue, hNoCastleFalse] using hTargets
-          rcases List.mem_filterMap.1 hStdMem with ⟨target, _hTarget, hSome⟩
+          rcases List.mem_filterMap.1 hStdMem with ⟨target, hTarget, hSome⟩
           have hFrom : m.fromSq = wk := by
             cases hFree :
               destinationFriendlyFree gs { piece := kingPiece Color.White, fromSq := wk, toSq := target } <;>
@@ -206,30 +205,24 @@ theorem KkInv.applyLegalMove_preserved (gs : GameState) (m : Move) (gs' : GameSt
             exact hs
           have hSafe' : inCheck (gs.movePiece m).board Color.White = false := by
             simpa [hToMove] using hSafeParts.2
-          -- Destination is not the black king square (kings cannot be captured).
+          have hTo : m.toSq = target := by
+            cases hFree :
+              destinationFriendlyFree gs { piece := kingPiece Color.White, fromSq := wk, toSq := target } <;>
+                simp [hFree] at hSome
+            cases hBoard : gs.board target <;> simp [hFree, hBoard] at hSome
+            · have hEq : m = { piece := kingPiece Color.White, fromSq := wk, toSq := target } := by
+                simpa using hSome.symm
+              simp [hEq]
+            · have hEq : m = { piece := kingPiece Color.White, fromSq := wk, toSq := target, isCapture := true } := by
+                simpa using hSome.symm
+              simp [hEq]
+          -- Destination is not the black king square (king step non-adjacency).
           have hToNeBk : m.toSq ≠ bk := by
             intro hEq
-            have hb0 := hBasic
-            unfold basicMoveLegalBool at hb0
-            have hb1 : (((originHasPiece gs m && turnMatches gs m) && destinationFriendlyFree gs m) &&
-                captureFlagConsistent gs m) = true ∧ squaresDiffer m = true :=
-              Eq.mp (Bool.and_eq_true _ _) hb0
-            have hb2 :
-                ((originHasPiece gs m && turnMatches gs m) && destinationFriendlyFree gs m) = true ∧
-                  captureFlagConsistent gs m = true :=
-              Eq.mp (Bool.and_eq_true _ _) hb1.1
-            have hb3 :
-                (originHasPiece gs m && turnMatches gs m) = true ∧ destinationFriendlyFree gs m = true :=
-              Eq.mp (Bool.and_eq_true _ _) hb2.1
-            have hDestTrue : destinationFriendlyFree gs m = true := hb3.2
-            -- `destinationFriendlyFree` is false on the black king square.
-            have hAtBk : gs.board.get bk = some (kingPiece Color.Black) := hKO.2.1
-            have hAtBk' : gs.board bk = some (kingPiece Color.Black) := by
-              simpa using hAtBk
-            have hDestFalse : destinationFriendlyFree gs m = false := by
-              simp [destinationFriendlyFree, hEq, hAtBk', hPiece, kingPiece]
-            have : (true : Bool) = false := by simpa [hDestTrue] using hDestFalse
-            cases this
+            have hTargetBk : target = bk := by rw [← hTo, hEq]
+            have hStep : Movement.isKingStep wk bk :=
+              hTargetBk ▸ (Movement.mem_kingTargets_iff wk target).mp hTarget
+            exact hNoAdj hStep
           -- Compute the resulting board (no EP/castling/promotion are possible for king moves).
           have hMovedBoard :
               (gs.movePiece m).board =
@@ -312,7 +305,7 @@ theorem KkInv.applyLegalMove_preserved (gs : GameState) (m : Move) (gs' : GameSt
                   else
                     none) := by
             simpa [pieceTargets, kingPiece, hNoCastleTrue, hNoCastleFalse] using hTargets
-          rcases List.mem_filterMap.1 hStdMem with ⟨target, _hTarget, hSome⟩
+          rcases List.mem_filterMap.1 hStdMem with ⟨target, hTarget, hSome⟩
           have hFrom : m.fromSq = bk := by
             cases hFree :
               destinationFriendlyFree gs { piece := kingPiece Color.Black, fromSq := bk, toSq := target } <;>
@@ -368,6 +361,17 @@ theorem KkInv.applyLegalMove_preserved (gs : GameState) (m : Move) (gs' : GameSt
             · have hEq : m = { piece := kingPiece Color.Black, fromSq := bk, toSq := target, isCapture := true } := by
                 simpa using hSome.symm
               simp [hEq]
+          have hTo : m.toSq = target := by
+            cases hFree :
+              destinationFriendlyFree gs { piece := kingPiece Color.Black, fromSq := bk, toSq := target } <;>
+                simp [hFree] at hSome
+            cases hBoard : gs.board target <;> simp [hFree, hBoard] at hSome
+            · have hEq : m = { piece := kingPiece Color.Black, fromSq := bk, toSq := target } := by
+                simpa using hSome.symm
+              simp [hEq]
+            · have hEq : m = { piece := kingPiece Color.Black, fromSq := bk, toSq := target, isCapture := true } := by
+                simpa using hSome.symm
+              simp [hEq]
           have hBasic : basicMoveLegalBool gs m = true :=
             basicLegalAndSafe_implies_basicMoveLegalBool gs m hSafe
           have hSquaresDiffer : squaresDiffer m = true := by
@@ -382,29 +386,13 @@ theorem KkInv.applyLegalMove_preserved (gs : GameState) (m : Move) (gs' : GameSt
             exact hs
           have hSafe' : inCheck (gs.movePiece m).board Color.Black = false := by
             simpa [hToMove] using hSafeParts.2
-          -- Destination is not the white king square.
+          -- Destination is not the white king square (king step non-adjacency).
           have hToNeWk : m.toSq ≠ wk := by
             intro hEq
-            have hb0 := hBasic
-            unfold basicMoveLegalBool at hb0
-            have hb1 : (((originHasPiece gs m && turnMatches gs m) && destinationFriendlyFree gs m) &&
-                captureFlagConsistent gs m) = true ∧ squaresDiffer m = true :=
-              Eq.mp (Bool.and_eq_true _ _) hb0
-            have hb2 :
-                ((originHasPiece gs m && turnMatches gs m) && destinationFriendlyFree gs m) = true ∧
-                  captureFlagConsistent gs m = true :=
-              Eq.mp (Bool.and_eq_true _ _) hb1.1
-            have hb3 :
-                (originHasPiece gs m && turnMatches gs m) = true ∧ destinationFriendlyFree gs m = true :=
-              Eq.mp (Bool.and_eq_true _ _) hb2.1
-            have hDestTrue : destinationFriendlyFree gs m = true := hb3.2
-            have hAtWk : gs.board.get wk = some (kingPiece Color.White) := hKO.1
-            have hAtWk' : gs.board wk = some (kingPiece Color.White) := by
-              simpa using hAtWk
-            have hDestFalse : destinationFriendlyFree gs m = false := by
-              simp [destinationFriendlyFree, hEq, hAtWk', hPiece, kingPiece]
-            have : (true : Bool) = false := by simpa [hDestTrue] using hDestFalse
-            cases this
+            have hTargetWk : target = wk := by rw [← hTo, hEq]
+            have hStep : Movement.isKingStep bk wk :=
+              hTargetWk ▸ (Movement.mem_kingTargets_iff bk target).mp hTarget
+            exact hNoAdj (Movement.isKingStep_symm bk wk hStep)
           have hMovedBoard :
               (gs.movePiece m).board =
                 (gs.board.update bk none).update m.toSq (some (kingPiece Color.Black)) := by

@@ -8,6 +8,26 @@ namespace Parsing
 
 open Rules
 
+/-- Membership in a foldr-built concatenation iff exists an element whose image contains b. -/
+theorem List.mem_foldr_append_iff {α β : Type} (f : α → List β) (b : β) (l : List α) :
+    b ∈ l.foldr (fun a acc => f a ++ acc) [] ↔ ∃ a ∈ l, b ∈ f a := by
+  induction l with
+  | nil => simp
+  | cons x xs ih =>
+    constructor
+    · intro h
+      rw [List.foldr] at h
+      rw [List.mem_append] at h
+      rcases h with hfx | hrest
+      · exact ⟨x, List.mem_cons_self, hfx⟩
+      · have ⟨a, ha, hb⟩ := ih.mp hrest
+        exact ⟨a, List.mem_cons_of_mem x ha, hb⟩
+    · intro ⟨a, ha, hb⟩
+      rw [List.foldr, List.mem_append]
+      rcases List.mem_cons.mp ha with rfl | ha'
+      · exact Or.inl hb
+      · exact Or.inr (ih.mpr ⟨a, ha', hb⟩)
+
 structure PGNMove where
   move : Move
   nags : List String := []
@@ -345,43 +365,52 @@ def normalizeCastleToken (s : String) : String :=
   let mapped := s.map (fun c => if c = '0' then 'O' else c)
   mapped
 
-def parseSanToken (token : String) : Except String SanToken := do
+/-- Strip leading annotation characters (! and ?) from a reversed char list -/
+def peelAnnotations : List Char → List Char → List Char × List Char
+  | c :: rest, acc =>
+      if c = '!' ∨ c = '?' then
+        peelAnnotations rest (c :: acc)
+      else
+        (c :: rest, acc)
+  | [], acc => ([], acc)
+
+/-- Extract the SAN base fields from a token (pure computation without normalization) -/
+def extractSanBase (token : String) :
+    Except String (String × Option SanCheckHint × List String) :=
   let trimmed := token.trim.replace "e.p." ""
   -- Also remove "ep" suffix if it appears after a move (e.g., exd6ep)
   let trimmed := if trimmed.endsWith "ep" then trimmed.dropRight 2 else trimmed
   if trimmed.isEmpty then
-    throw "SAN token cannot be empty"
-  let rec peelAnnotations (chars : List Char) (acc : List Char) :
-      List Char × List Char :=
-    match chars with
-    | c :: rest =>
-        if c = '!' ∨ c = '?' then
-          peelAnnotations rest (c :: acc)
-        else
-          (chars, acc)
-    | [] => ([], acc)
-  let rev := trimmed.toList.reverse
-  let (revAfterAnn, annRev) := peelAnnotations rev []
-  let (afterMate, hasMate) :=
-    match revAfterAnn with
-    | '#' :: rest => (rest, true)
-    | _ => (revAfterAnn, false)
-  let dropped := afterMate.dropWhile (fun c => c = '+')
-  let (afterChecks, hasCheck) :=
-    if hasMate then
-      (dropped, false)
+    .error "SAN token cannot be empty"
+  else
+    let rev := trimmed.toList.reverse
+    let (revAfterAnn, annRev) := peelAnnotations rev []
+    let (afterMate, hasMate) :=
+      match revAfterAnn with
+      | '#' :: rest => (rest, true)
+      | _ => (revAfterAnn, false)
+    let dropped := afterMate.dropWhile (fun c => c = '+')
+    let (afterChecks, hasCheck) :=
+      if hasMate then
+        (dropped, false)
+      else
+        (dropped, dropped.length ≠ afterMate.length)
+    let base := String.ofList afterChecks.reverse
+    if base.isEmpty then
+      .error s!"SAN token missing move description: {token}"
     else
-      (dropped, dropped.length ≠ afterMate.length)
-  let base := String.ofList afterChecks.reverse
-  if base.isEmpty then
-    throw s!"SAN token missing move description: {token}"
-  let nags := if annRev.isEmpty then [] else [String.ofList annRev]
-  let normalized := normalizeCastleToken base
-  let hint :=
-    if hasMate then some SanCheckHint.mate
-    else if hasCheck then some SanCheckHint.check
-    else none
-  return { raw := token, san := normalized, checkHint := hint, nags := nags }
+      let nags := if annRev.isEmpty then [] else [String.ofList annRev]
+      let hint :=
+        if hasMate then some SanCheckHint.mate
+        else if hasCheck then some SanCheckHint.check
+        else none
+      .ok (base, hint, nags)
+
+def parseSanToken (token : String) : Except String SanToken :=
+  match extractSanBase token with
+  | .ok (base, hint, nags) =>
+    .ok { raw := token, san := normalizeCastleToken base, checkHint := hint, nags := nags }
+  | .error e => .error e
 
 def validateCheckHint (token : SanToken) (after : GameState) : Except String Unit :=
   match token.checkHint with

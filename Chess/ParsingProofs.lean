@@ -55,35 +55,6 @@ theorem String.front_eq_head {s : String} (hne : s ≠ "")
   | cons c cs =>
       simp [String.front_ofList_cons]
 
--- TODO: String internal API has changed in Lean 4 - needs rewrite
-theorem String.back_ofList_cons (c : Char) (cs : List Char) :
-    (String.ofList (c :: cs)).back =
-      (match cs with
-       | [] => c
-       | _ => (String.ofList cs).back) := by
-  sorry
-
--- TODO: String internal API has changed in Lean 4 - needs rewrite
-theorem String.back_eq_getLast {s : String} (hne : s ≠ "")
-    (hlist : s.toList ≠ []) :
-    s.back = s.toList.getLast
-      (by
-        intro hnil
-        exact hne ((String.toList_eq_nil_iff).1 hnil)) := by
-  sorry
-
--- TODO: String internal API has changed in Lean 4 - needs rewrite
-theorem trim_eq_self_of_nonWhitespace_ends (s : String)
-    (hne : s ≠ "")
-    (hfront : s.front.isWhitespace = false)
-    (hback : s.back.isWhitespace = false) :
-    s.trim = s := by
-  sorry
-
--- TODO: depends on String proofs that need updating for Lean 4
-theorem repr_trim (n : Nat) : (Nat.repr n).trim = Nat.repr n := by
-  sorry
-
 section NatDecimalLemmas
 
 open Nat
@@ -319,15 +290,403 @@ private theorem repr_list_no_whitespace (n : Nat) :
     (Nat.repr n).toList.All (fun c => c.isWhitespace = false) := by
   simpa [repr_toDigits_list] using toDigits_no_whitespace n
 
--- TODO: String internal API has changed - needs rewrite
+-- ============================================================================
+-- String.foldl / String.all proofs via byte-position iteration
+-- ============================================================================
+
+section StringFoldlProofs
+
+-- Sum of UTF-8 byte sizes for a character list
+private def utf8SizeSum : List Char → Nat
+  | [] => 0
+  | c :: cs => c.utf8Size + utf8SizeSum cs
+
+private theorem utf8SizeSum_append (l1 l2 : List Char) :
+    utf8SizeSum (l1 ++ l2) = utf8SizeSum l1 + utf8SizeSum l2 := by
+  induction l1 with
+  | nil => simp [utf8SizeSum]
+  | cons c cs ih => simp [utf8SizeSum, ih]; omega
+
+-- One-step unfolding lemmas for foldlAux/anyAux
+private theorem foldlAux_step {α : Type _} (f : α → Char → α) (s : String)
+    (stop pos : String.Pos.Raw) (a : α) (h : pos < stop) :
+    String.foldlAux f s stop pos a =
+      String.foldlAux f s stop (pos.next s) (f a (pos.get s)) := by
+  rw [String.foldlAux.eq_1, dif_pos h]
+
+private theorem foldlAux_done {α : Type _} (f : α → Char → α) (s : String)
+    (stop pos : String.Pos.Raw) (a : α) (h : ¬ pos < stop) :
+    String.foldlAux f s stop pos a = a := by
+  rw [String.foldlAux.eq_1, dif_neg h]
+
+private theorem anyAux_step (s : String) (stop : String.Pos.Raw) (p : Char → Bool)
+    (pos : String.Pos.Raw) (h : pos < stop) (hp : p (pos.get s) = false) :
+    String.anyAux s stop p pos = String.anyAux s stop p (pos.next s) := by
+  rw [String.anyAux.eq_1, dif_pos h, if_neg (by simp [hp])]
+
+private theorem anyAux_step_true (s : String) (stop : String.Pos.Raw) (p : Char → Bool)
+    (pos : String.Pos.Raw) (h : pos < stop) (hp : p (pos.get s) = true) :
+    String.anyAux s stop p pos = true := by
+  rw [String.anyAux.eq_1, dif_pos h, if_pos (by simp [hp])]
+
+private theorem anyAux_done (s : String) (stop : String.Pos.Raw) (p : Char → Bool)
+    (pos : String.Pos.Raw) (h : ¬ pos < stop) :
+    String.anyAux s stop p pos = false := by
+  rw [String.anyAux.eq_1, dif_neg h]
+
+-- Key lemma: utf8GetAux returns the right character at accumulated byte position
+private theorem utf8GetAux_at_sum (pref : List Char) (c : Char) (suf : List Char)
+    (startPos : String.Pos.Raw) :
+    String.Pos.Raw.utf8GetAux (pref ++ c :: suf) startPos
+      (⟨startPos.byteIdx + utf8SizeSum pref⟩ : String.Pos.Raw) = c := by
+  induction pref generalizing startPos with
+  | nil =>
+    simp [utf8SizeSum]
+    unfold String.Pos.Raw.utf8GetAux
+    rw [if_pos (String.Pos.Raw.ext rfl).symm]
+  | cons p ps ih =>
+    simp only [List.cons_append]
+    unfold String.Pos.Raw.utf8GetAux
+    have hne : startPos ≠
+        (⟨startPos.byteIdx + utf8SizeSum (p :: ps)⟩ : String.Pos.Raw) := by
+      intro h
+      have := congrArg String.Pos.Raw.byteIdx h
+      simp [utf8SizeSum] at this
+      have : p.utf8Size > 0 := Char.utf8Size_pos p
+      omega
+    rw [if_neg hne,
+      show (⟨startPos.byteIdx + utf8SizeSum (p :: ps)⟩ : String.Pos.Raw) =
+        (⟨(startPos + p).byteIdx + utf8SizeSum ps⟩ : String.Pos.Raw) from
+        String.Pos.Raw.ext (by
+          simp [String.Pos.Raw.byteIdx_add_char, utf8SizeSum]; omega)]
+    exact ih (startPos + p)
+
+-- utf8ByteSize of String.ofList equals utf8SizeSum
+private theorem utf8ByteSize_eq_utf8SizeSum (l : List Char) :
+    (String.ofList l).utf8ByteSize = utf8SizeSum l := by
+  induction l with
+  | nil => simp [String.ofList_nil, utf8SizeSum]
+  | cons c cs ih =>
+    have : String.ofList (c :: cs) = String.singleton c ++ String.ofList cs := by
+      rw [show c :: cs = [c] ++ cs from rfl, String.ofList_append, String.singleton_eq_ofList]
+    rw [this, String.utf8ByteSize_append, String.utf8ByteSize_singleton, utf8SizeSum, ih]
+
+private theorem utf8SizeSum_lt_append_cons (pref : List Char) (c : Char) (cs : List Char) :
+    utf8SizeSum pref < utf8SizeSum (pref ++ c :: cs) := by
+  rw [utf8SizeSum_append]; simp [utf8SizeSum]
+  have : c.utf8Size > 0 := Char.utf8Size_pos c; omega
+
+-- get/next at byte offset of prefix yields the next character
+private theorem get_at_prefix_end (pref : List Char) (c : Char) (suf : List Char) :
+    (⟨utf8SizeSum pref⟩ : String.Pos.Raw).get (String.ofList (pref ++ c :: suf)) = c := by
+  show String.Pos.Raw.get (String.ofList (pref ++ c :: suf)) ⟨utf8SizeSum pref⟩ = c
+  simp only [String.Pos.Raw.get, String.toList_ofList]
+  have h : (⟨utf8SizeSum pref⟩ : String.Pos.Raw) =
+      (⟨(0 : String.Pos.Raw).byteIdx + utf8SizeSum pref⟩ : String.Pos.Raw) := by
+    simp [String.Pos.Raw.byteIdx_zero]
+  rw [h]
+  exact utf8GetAux_at_sum pref c suf 0
+
+private theorem next_at_prefix_end (pref : List Char) (c : Char) (suf : List Char) :
+    (⟨utf8SizeSum pref⟩ : String.Pos.Raw).next (String.ofList (pref ++ c :: suf)) =
+      (⟨utf8SizeSum (pref ++ [c])⟩ : String.Pos.Raw) := by
+  show String.Pos.Raw.next (String.ofList (pref ++ c :: suf)) ⟨utf8SizeSum pref⟩ =
+    ⟨utf8SizeSum (pref ++ [c])⟩
+  simp only [String.Pos.Raw.next, get_at_prefix_end]
+  exact String.Pos.Raw.ext (by
+    simp [String.Pos.Raw.byteIdx_add_char, utf8SizeSum_append, utf8SizeSum])
+
+-- General foldlAux lemma: starting at byte offset of prefix visits suffix chars
+private theorem foldlAux_suffix {α : Type _} (f : α → Char → α)
+    (pref suf : List Char) (a : α) :
+    String.foldlAux f (String.ofList (pref ++ suf))
+      (String.ofList (pref ++ suf)).rawEndPos
+      (⟨utf8SizeSum pref⟩ : String.Pos.Raw) a = suf.foldl f a := by
+  induction suf generalizing pref a with
+  | nil =>
+    simp only [List.append_nil]
+    exact foldlAux_done _ _ _ _ _ (by
+      simp [String.rawEndPos, String.Pos.Raw.lt_iff, utf8ByteSize_eq_utf8SizeSum])
+  | cons c cs ih =>
+    have h_lt : (⟨utf8SizeSum pref⟩ : String.Pos.Raw) <
+        (String.ofList (pref ++ c :: cs)).rawEndPos := by
+      simp only [String.rawEndPos, String.Pos.Raw.lt_iff, utf8ByteSize_eq_utf8SizeSum]
+      exact utf8SizeSum_lt_append_cons pref c cs
+    rw [foldlAux_step _ _ _ _ _ h_lt, get_at_prefix_end, next_at_prefix_end]
+    simp only [List.foldl_cons]
+    rw [show String.ofList (pref ++ c :: cs) = String.ofList ((pref ++ [c]) ++ cs) from by
+      congr 1; simp [List.append_assoc]]
+    exact ih (pref ++ [c]) (f a c)
+
+-- General anyAux lemma: starting at byte offset of prefix checks suffix chars
+private theorem anyAux_suffix (p : Char → Bool) (pref suf : List Char) :
+    String.anyAux (String.ofList (pref ++ suf))
+      (String.ofList (pref ++ suf)).rawEndPos p
+      (⟨utf8SizeSum pref⟩ : String.Pos.Raw) = suf.any p := by
+  induction suf generalizing pref with
+  | nil =>
+    simp only [List.append_nil, List.any_nil]
+    exact anyAux_done _ _ _ _ (by
+      simp [String.rawEndPos, String.Pos.Raw.lt_iff, utf8ByteSize_eq_utf8SizeSum])
+  | cons c cs ih =>
+    have h_lt : (⟨utf8SizeSum pref⟩ : String.Pos.Raw) <
+        (String.ofList (pref ++ c :: cs)).rawEndPos := by
+      simp only [String.rawEndPos, String.Pos.Raw.lt_iff, utf8ByteSize_eq_utf8SizeSum]
+      exact utf8SizeSum_lt_append_cons pref c cs
+    simp only [List.any_cons]
+    cases hp : p c with
+    | true =>
+      rw [anyAux_step_true _ _ _ _ h_lt (by rw [get_at_prefix_end]; exact hp)]
+      simp
+    | false =>
+      rw [anyAux_step _ _ _ _ h_lt (by
+            show p ((⟨utf8SizeSum pref⟩ : String.Pos.Raw).get
+              (String.ofList (pref ++ c :: cs))) = false
+            rw [get_at_prefix_end]; exact hp),
+          next_at_prefix_end]
+      simp only [Bool.false_or]
+      rw [show String.ofList (pref ++ c :: cs) = String.ofList ((pref ++ [c]) ++ cs) from by
+        congr 1; simp [List.append_assoc]]
+      exact ih (pref ++ [c])
+
+-- ============================================================================
+-- String.back / String.trim proofs via byte-position iteration
+-- ============================================================================
+
+-- Key lemma: utf8PrevAux at the end of a non-empty list returns position of last char
+private theorem utf8PrevAux_at_end (pref : List Char) (c : Char)
+    (startPos : String.Pos.Raw) :
+    String.Pos.Raw.utf8PrevAux (pref ++ [c]) startPos
+      (⟨startPos.byteIdx + utf8SizeSum (pref ++ [c])⟩ : String.Pos.Raw) =
+      (⟨startPos.byteIdx + utf8SizeSum pref⟩ : String.Pos.Raw) := by
+  induction pref generalizing startPos with
+  | nil =>
+    simp [utf8SizeSum]
+    unfold String.Pos.Raw.utf8PrevAux
+    have h_le : (⟨startPos.byteIdx + c.utf8Size⟩ : String.Pos.Raw) ≤ (startPos + c) := by
+      simp [String.Pos.Raw.le_iff, String.Pos.Raw.byteIdx_add_char]
+    rw [if_pos h_le]
+  | cons d ds ih =>
+    simp only [List.cons_append]
+    unfold String.Pos.Raw.utf8PrevAux
+    have h_not_le : ¬ ((⟨startPos.byteIdx + utf8SizeSum (d :: (ds ++ [c]))⟩ : String.Pos.Raw) ≤
+        (startPos + d)) := by
+      simp [String.Pos.Raw.le_iff, String.Pos.Raw.byteIdx_add_char, utf8SizeSum, utf8SizeSum_append]
+      have : c.utf8Size > 0 := Char.utf8Size_pos c
+      omega
+    rw [if_neg h_not_le]
+    have h_target : (⟨startPos.byteIdx + utf8SizeSum (d :: (ds ++ [c]))⟩ : String.Pos.Raw) =
+        (⟨(startPos + d).byteIdx + utf8SizeSum (ds ++ [c])⟩ : String.Pos.Raw) := by
+      apply String.Pos.Raw.ext
+      simp [String.Pos.Raw.byteIdx_add_char, utf8SizeSum]
+      omega
+    rw [h_target, ih (startPos + d)]
+    apply String.Pos.Raw.ext
+    simp [String.Pos.Raw.byteIdx_add_char, utf8SizeSum]
+    omega
+
+-- Helper: non-empty string has positive utf8ByteSize
+private theorem utf8ByteSize_pos_of_ne_empty {s : String} (hne : s ≠ "") :
+    0 < s.utf8ByteSize := by
+  have h_toList_ne : s.toList ≠ [] := by
+    intro h; exact hne (String.toList_eq_nil_iff.1 h)
+  obtain ⟨c, cs, hcs⟩ := List.exists_cons_of_ne_nil h_toList_ne
+  rw [show s.utf8ByteSize = (String.ofList s.toList).utf8ByteSize from by
+    rw [@String.ofList_toList s]]
+  rw [utf8ByteSize_eq_utf8SizeSum, hcs, utf8SizeSum]
+  have : c.utf8Size > 0 := Char.utf8Size_pos c
+  omega
+
+-- back of ofList equals getLast
+private theorem back_ofList_eq_getLast (l : List Char) (hne : l ≠ []) :
+    (String.ofList l).back = l.getLast hne := by
+  show String.Pos.Raw.get (String.ofList l)
+    (String.Pos.Raw.utf8PrevAux (String.ofList l).toList 0 (String.ofList l).rawEndPos) =
+    l.getLast hne
+  rw [String.toList_ofList]
+  have h_endPos : (String.ofList l).rawEndPos = (⟨utf8SizeSum l⟩ : String.Pos.Raw) := by
+    simp [String.rawEndPos, utf8ByteSize_eq_utf8SizeSum]
+  rw [h_endPos]
+  have h_prev : String.Pos.Raw.utf8PrevAux l 0 (⟨utf8SizeSum l⟩ : String.Pos.Raw) =
+      (⟨utf8SizeSum l.dropLast⟩ : String.Pos.Raw) := by
+    have h_split : l = l.dropLast ++ [l.getLast hne] :=
+      (List.dropLast_concat_getLast hne).symm
+    suffices h : String.Pos.Raw.utf8PrevAux (l.dropLast ++ [l.getLast hne]) 0
+        (⟨utf8SizeSum (l.dropLast ++ [l.getLast hne])⟩ : String.Pos.Raw) =
+        (⟨utf8SizeSum l.dropLast⟩ : String.Pos.Raw) by
+      rwa [← h_split] at h
+    rw [show (⟨utf8SizeSum (l.dropLast ++ [l.getLast hne])⟩ : String.Pos.Raw) =
+        (⟨(0 : String.Pos.Raw).byteIdx + utf8SizeSum (l.dropLast ++ [l.getLast hne])⟩ :
+          String.Pos.Raw) from by
+      simp [String.Pos.Raw.byteIdx_zero]]
+    rw [utf8PrevAux_at_end l.dropLast (l.getLast hne) 0]
+    simp [String.Pos.Raw.byteIdx_zero]
+  rw [h_prev]
+  have h_split : l = l.dropLast ++ [l.getLast hne] :=
+    (List.dropLast_concat_getLast hne).symm
+  rw [show String.ofList l = String.ofList (l.dropLast ++ l.getLast hne :: []) from
+    congrArg String.ofList h_split]
+  exact get_at_prefix_end l.dropLast (l.getLast hne) []
+
+-- go₂ on a full list returns the list itself
+private theorem extract_go₂_full (l : List Char) (startPos : String.Pos.Raw) :
+    String.Pos.Raw.extract.go₂ l startPos
+      (⟨startPos.byteIdx + utf8SizeSum l⟩ : String.Pos.Raw) = l := by
+  induction l generalizing startPos with
+  | nil => simp [utf8SizeSum]; rfl
+  | cons c cs ih =>
+    rw [String.Pos.Raw.extract.go₂.eq_2]
+    have hne : startPos ≠ (⟨startPos.byteIdx + utf8SizeSum (c :: cs)⟩ : String.Pos.Raw) := by
+      intro h
+      have := congrArg String.Pos.Raw.byteIdx h
+      simp [utf8SizeSum] at this
+      have : c.utf8Size > 0 := Char.utf8Size_pos c
+      omega
+    rw [if_neg hne]
+    congr 1
+    rw [show (⟨startPos.byteIdx + utf8SizeSum (c :: cs)⟩ : String.Pos.Raw) =
+        (⟨(startPos + c).byteIdx + utf8SizeSum cs⟩ : String.Pos.Raw) from
+      String.Pos.Raw.ext (by
+        simp [String.Pos.Raw.byteIdx_add_char, utf8SizeSum]; omega)]
+    exact ih (startPos + c)
+
+-- extract from 0 to rawEndPos = identity
+private theorem extract_zero_rawEndPos (s : String) (hne : s ≠ "") :
+    String.Pos.Raw.extract s 0 s.rawEndPos = s := by
+  show (if (0 : String.Pos.Raw).byteIdx ≥ s.rawEndPos.byteIdx then ""
+    else String.ofList (String.Pos.Raw.extract.go₁ s.toList 0 0 s.rawEndPos)) = s
+  have h_not_ge : ¬ ((0 : String.Pos.Raw).byteIdx ≥ s.rawEndPos.byteIdx) := by
+    show ¬ (0 ≥ s.utf8ByteSize)
+    have := utf8ByteSize_pos_of_ne_empty hne
+    omega
+  rw [if_neg h_not_ge]
+  have h_toList_ne : s.toList ≠ [] := by
+    intro h; exact hne (String.toList_eq_nil_iff.1 h)
+  obtain ⟨c, cs, hcs⟩ := List.exists_cons_of_ne_nil h_toList_ne
+  rw [hcs, String.Pos.Raw.extract.go₁.eq_2]
+  simp only [ite_true]
+  have h_endPos : s.rawEndPos = (⟨utf8SizeSum s.toList⟩ : String.Pos.Raw) := by
+    apply String.Pos.Raw.ext
+    show s.utf8ByteSize = utf8SizeSum s.toList
+    have h := utf8ByteSize_eq_utf8SizeSum s.toList
+    rw [show String.ofList s.toList = s from String.ofList_toList] at h
+    exact h
+  rw [h_endPos, hcs]
+  rw [show (⟨utf8SizeSum (c :: cs)⟩ : String.Pos.Raw) =
+      (⟨(0 : String.Pos.Raw).byteIdx + utf8SizeSum (c :: cs)⟩ : String.Pos.Raw) from by
+    apply String.Pos.Raw.ext; simp]
+  rw [extract_go₂_full (c :: cs) 0, ← hcs]
+  exact @String.ofList_toList s
+
+-- takeWhileAux stops immediately if first char doesn't satisfy predicate
+private theorem takeWhileAux_stop_first_false (s : String) (hne : s ≠ "")
+    (p : Char → Bool) (hp : p s.front = false) :
+    Substring.Raw.takeWhileAux s s.rawEndPos p 0 = 0 := by
+  rw [Substring.Raw.takeWhileAux.eq_1]
+  have h_lt : (0 : String.Pos.Raw) < s.rawEndPos := by
+    simp only [String.Pos.Raw.lt_iff, String.rawEndPos]
+    exact utf8ByteSize_pos_of_ne_empty hne
+  rw [dif_pos h_lt]
+  have h_not : ¬ (p (String.Pos.Raw.get s 0) = true) := by
+    rw [show String.Pos.Raw.get s 0 = s.front from rfl, hp]
+    exact Bool.false_ne_true
+  exact if_neg h_not
+
+-- takeRightWhileAux stops if last char doesn't satisfy predicate
+private theorem takeRightWhileAux_stop_last_false (s : String) (hne : s ≠ "")
+    (p : Char → Bool) (hp : p s.back = false) :
+    Substring.Raw.takeRightWhileAux s 0 p s.rawEndPos = s.rawEndPos := by
+  rw [Substring.Raw.takeRightWhileAux.eq_def]
+  have h_lt : (0 : String.Pos.Raw) < s.rawEndPos := by
+    simp only [String.Pos.Raw.lt_iff, String.rawEndPos]
+    exact utf8ByteSize_pos_of_ne_empty hne
+  rw [dif_pos h_lt]
+  have h_true : (! p (String.Pos.Raw.get s (String.Pos.Raw.prev s s.rawEndPos))) = true := by
+    show (! p s.back) = true
+    rw [hp]; simp
+  exact if_pos h_true
+
+end StringFoldlProofs
+
+theorem String.back_ofList_cons (c : Char) (cs : List Char) :
+    (String.ofList (c :: cs)).back =
+      (match cs with
+       | [] => c
+       | _ => (String.ofList cs).back) := by
+  cases cs with
+  | nil =>
+    have h := back_ofList_eq_getLast [c] (List.cons_ne_nil c [])
+    simp [List.getLast_singleton] at h
+    exact h
+  | cons d ds =>
+    simp only
+    have h1 := back_ofList_eq_getLast (c :: d :: ds) (List.cons_ne_nil c (d :: ds))
+    have h2 := back_ofList_eq_getLast (d :: ds) (List.cons_ne_nil d ds)
+    rw [h1, h2]
+    exact List.getLast_cons (List.cons_ne_nil d ds)
+
+theorem String.back_eq_getLast {s : String} (hne : s ≠ "")
+    (hlist : s.toList ≠ []) :
+    s.back = s.toList.getLast
+      (by intro hnil; exact hne ((String.toList_eq_nil_iff).1 hnil)) := by
+  have h := back_ofList_eq_getLast s.toList hlist
+  rw [String.ofList_toList] at h
+  exact h
+
+theorem trim_eq_self_of_nonWhitespace_ends (s : String)
+    (hne : s ≠ "")
+    (hfront : s.front.isWhitespace = false)
+    (hback : s.back.isWhitespace = false) :
+    s.trim = s := by
+  have h1 : Substring.Raw.takeWhileAux s s.rawEndPos Char.isWhitespace 0 = 0 :=
+    takeWhileAux_stop_first_false s hne Char.isWhitespace hfront
+  have h2 : Substring.Raw.takeRightWhileAux s 0 Char.isWhitespace s.rawEndPos = s.rawEndPos :=
+    takeRightWhileAux_stop_last_false s hne Char.isWhitespace hback
+  show Substring.Raw.toString (Substring.Raw.trim (String.toRawSubstring s)) = s
+  simp only [String.toRawSubstring, Substring.Raw.trim]
+  show String.Pos.Raw.extract s
+    (Substring.Raw.takeWhileAux s s.rawEndPos Char.isWhitespace 0)
+    (Substring.Raw.takeRightWhileAux s
+      (Substring.Raw.takeWhileAux s s.rawEndPos Char.isWhitespace 0)
+      Char.isWhitespace s.rawEndPos) = s
+  rw [h1, h2]
+  exact extract_zero_rawEndPos s hne
+
+theorem repr_trim (n : Nat) : (Nat.repr n).trim = Nat.repr n := by
+  have hne : Nat.repr n ≠ "" := by
+    intro h; have := repr_nonempty n; simp [h, String.isEmpty] at this
+  have hlist : (Nat.repr n).toList ≠ [] := by
+    intro h; exact hne (String.toList_eq_nil_iff.1 h)
+  have h_no_ws := repr_list_no_whitespace n
+  have hfront : (Nat.repr n).front.isWhitespace = false := by
+    have h_head := String.front_eq_head hne hlist
+    rw [h_head]; exact List.All.head h_no_ws hlist
+  have hback : (Nat.repr n).back.isWhitespace = false := by
+    have h_last := String.back_eq_getLast hne hlist
+    rw [h_last]; exact List.All.getLast h_no_ws hlist
+  exact trim_eq_self_of_nonWhitespace_ends _ hne hfront hback
+
 theorem String.foldl_ofList {α : Type _} (f : α → Char → α) (init : α) :
     ∀ l : List Char, String.foldl f init (String.ofList l) = List.foldl f init l := by
-  sorry
+  intro l
+  show String.foldlAux f (String.ofList l) (String.ofList l).rawEndPos 0 init = l.foldl f init
+  rw [show (0 : String.Pos.Raw) = (⟨utf8SizeSum ([] : List Char)⟩ : String.Pos.Raw) from rfl,
+      show String.ofList l = String.ofList ([] ++ l) from by simp]
+  exact foldlAux_suffix f [] l init
 
--- TODO: String internal API has changed - needs rewrite
 theorem String.all_ofList (p : Char → Bool) :
     ∀ l : List Char, (String.ofList l).all p = l.all p := by
-  sorry
+  intro l
+  -- String.all s p = !String.any s (fun c => !p c)
+  -- String.any s q = String.anyAux s s.rawEndPos q 0
+  unfold String.all String.any
+  -- Goal: !(anyAux (ofList l) (ofList l).rawEndPos (fun c => !p c) 0) = l.all p
+  congr 1
+  rw [show (0 : String.Pos.Raw) = (⟨utf8SizeSum ([] : List Char)⟩ : String.Pos.Raw) from rfl,
+      show String.ofList l = String.ofList ([] ++ l) from by simp]
+  rw [anyAux_suffix (fun c => !p c) [] l]
+  -- Goal: l.any (fun c => !p c) = !l.all p
+  simp [List.any_eq_not_all_not]
 
 theorem repr_eq_ofList (n : Nat) :
     Nat.repr n = String.ofList (Nat.toDigits 10 n) := by
@@ -351,9 +710,16 @@ theorem repr_isNat (n : Nat) :
   have hnonempty : (Nat.repr n).isEmpty = false := repr_nonempty n
   simp [String.isNat, hnonempty, hallStr]
 
--- TODO: depends on String.foldl_ofList which uses sorry
 theorem toNat?_repr (n : Nat) : String.toNat? (Nat.repr n) = some n := by
-  sorry
+  have h_isNat := repr_isNat n
+  simp only [String.toNat?, h_isNat, ite_true]
+  -- Goal: some ((Nat.repr n).foldl (fun n c => n * 10 + (c.toNat - '0'.toNat)) 0) = some n
+  congr 1
+  rw [repr_eq_ofList, String.foldl_ofList]
+  -- Goal: (Nat.toDigits 10 n).foldl (fun n c => n * 10 + (c.toNat - '0'.toNat)) 0 = n
+  -- This is decodeDigits since digitValue c = c.toNat - '0'.toNat
+  show decodeDigits (Nat.toDigits 10 n) = n
+  exact decodeDigits_toDigits n
 
 end NatDecimalLemmas
 

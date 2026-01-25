@@ -414,19 +414,169 @@ private theorem dropRight_zero (s : String) : s.dropRight 0 = s := by
 
 /-! ## Section 5b: prevn lemmas for dropRight proof -/
 
+/-- Generalized helper: utf8PrevAux steps back through the last character starting from startPos. -/
+private theorem utf8PrevAux_last_gen (l : List Char) (c : Char) (startPos : Nat) :
+    String.Pos.Raw.utf8PrevAux (l ++ [c]) ⟨startPos⟩
+      (⟨startPos + utf8Len (l ++ [c])⟩ : String.Pos.Raw) =
+      (⟨startPos + utf8Len l⟩ : String.Pos.Raw) := by
+  induction l generalizing startPos with
+  | nil =>
+    simp only [utf8Len, List.nil_append, Nat.add_zero]
+    unfold String.Pos.Raw.utf8PrevAux
+    have h_le : (⟨startPos + c.utf8Size⟩ : String.Pos.Raw) ≤ (⟨startPos⟩ : String.Pos.Raw) + c := by
+      simp only [String.Pos.Raw.le_iff, pos_add_char]; omega
+    rw [if_pos h_le]
+  | cons d ds ih =>
+    simp only [List.cons_append]
+    unfold String.Pos.Raw.utf8PrevAux
+    have h_not_le : ¬((⟨startPos + utf8Len (d :: (ds ++ [c]))⟩ : String.Pos.Raw) ≤
+        (⟨startPos⟩ : String.Pos.Raw) + d) := by
+      simp only [String.Pos.Raw.le_iff, pos_add_char, utf8Len, utf8Len_append]
+      have := Char.utf8Size_pos c; omega
+    rw [if_neg h_not_le, pos_add_char]
+    have h1 : (⟨startPos + utf8Len (d :: (ds ++ [c]))⟩ : String.Pos.Raw) =
+        (⟨startPos + d.utf8Size + utf8Len (ds ++ [c])⟩ : String.Pos.Raw) :=
+      String.Pos.Raw.ext (by simp [utf8Len, utf8Len_append]; omega)
+    have h2 : (⟨startPos + utf8Len (d :: ds)⟩ : String.Pos.Raw) =
+        (⟨startPos + d.utf8Size + utf8Len ds⟩ : String.Pos.Raw) :=
+      String.Pos.Raw.ext (by simp [utf8Len]; omega)
+    rw [h1, h2]; exact ih (startPos + d.utf8Size)
+
 /-- Helper: utf8PrevAux steps back through the last character.
-    This is proved by showing that walking back from the end of (l ++ [c]) lands at utf8Len l. -/
+    Walking back from the end of (l ++ [c]) lands at utf8Len l. -/
 private theorem utf8PrevAux_last (l : List Char) (c : Char) :
     String.Pos.Raw.utf8PrevAux (l ++ [c]) 0 ⟨utf8Len (l ++ [c])⟩ = ⟨utf8Len l⟩ := by
-  -- The proof follows from the fact that utf8PrevAux walks back one character
-  -- by finding the previous UTF-8 boundary. For (l ++ [c]), walking back from
-  -- utf8Len(l ++ [c]) = utf8Len(l) + c.utf8Size lands at utf8Len(l).
-  -- This is verified by the SAN parsing test suite.
-  -- The full formal proof requires complex induction on the UTF-8 encoding structure.
-  sorry
+  have h := utf8PrevAux_last_gen l c 0
+  simp only [Nat.zero_add] at h; exact h
+
+/-- Extra characters past the position don't affect utf8PrevAux result. -/
+private theorem utf8PrevAux_append_extra (l1 l2 : List Char) (h_ne : l1 ≠ [])
+    (startPos p : Nat) (h_le : p ≤ startPos + utf8Len l1) :
+    String.Pos.Raw.utf8PrevAux (l1 ++ l2) (⟨startPos⟩ : String.Pos.Raw)
+      (⟨p⟩ : String.Pos.Raw) =
+    String.Pos.Raw.utf8PrevAux l1 (⟨startPos⟩ : String.Pos.Raw)
+      (⟨p⟩ : String.Pos.Raw) := by
+  induction l1 generalizing startPos l2 with
+  | nil => exact absurd rfl h_ne
+  | cons c cs ih =>
+    simp only [List.cons_append]
+    unfold String.Pos.Raw.utf8PrevAux
+    by_cases h_cond : p ≤ startPos + c.utf8Size
+    · have h_le1 : (⟨p⟩ : String.Pos.Raw) ≤ (⟨startPos⟩ : String.Pos.Raw) + c := by
+        simp [String.Pos.Raw.le_iff, pos_add_char]; exact h_cond
+      rw [if_pos h_le1, if_pos h_le1]
+    · have h_nle1 : ¬((⟨p⟩ : String.Pos.Raw) ≤ (⟨startPos⟩ : String.Pos.Raw) + c) := by
+        simp [String.Pos.Raw.le_iff, pos_add_char]; omega
+      rw [if_neg h_nle1, if_neg h_nle1, pos_add_char]
+      cases cs with
+      | nil => simp [utf8Len] at h_le; omega
+      | cons d ds =>
+        exact ih l2 (List.cons_ne_nil d ds) (startPos + c.utf8Size)
+          (by simp [utf8Len] at h_le ⊢; omega)
+
+/-- Combined helper: utf8PrevAux on (l ++ [c]) ++ extra at position utf8Len(l ++ [c])
+    gives utf8Len l. -/
+private theorem utf8PrevAux_last_with_extra (l : List Char) (c : Char) (extra : List Char) :
+    String.Pos.Raw.utf8PrevAux ((l ++ [c]) ++ extra) 0
+      (⟨utf8Len (l ++ [c])⟩ : String.Pos.Raw) =
+      (⟨utf8Len l⟩ : String.Pos.Raw) :=
+  (utf8PrevAux_append_extra (l ++ [c]) extra (by simp) 0
+    (utf8Len (l ++ [c])) (by omega)).trans
+  (utf8PrevAux_last l c)
+
+/-- General prevn theorem: walking back n characters through a suffix. -/
+private theorem prevn_drops (n : Nat) :
+    ∀ (prefix_list suffix extra : List Char),
+    suffix.length = n →
+    Substring.Raw.prevn
+      ⟨String.ofList (prefix_list ++ suffix ++ extra),
+        (0 : String.Pos.Raw),
+        (⟨utf8Len (prefix_list ++ suffix ++ extra)⟩ : String.Pos.Raw)⟩
+      n
+      (⟨utf8Len (prefix_list ++ suffix)⟩ : String.Pos.Raw) =
+    (⟨utf8Len prefix_list⟩ : String.Pos.Raw) := by
+  induction n with
+  | zero =>
+    intro prefix_list suffix extra hn
+    have h_nil : suffix = [] := by cases suffix with | nil => rfl | cons _ _ => simp at hn
+    subst h_nil; simp only [List.append_nil, Substring.Raw.prevn.eq_1]
+  | succ k ih =>
+    intro prefix_list suffix extra hn
+    have h_ne : suffix ≠ [] := by intro h; rw [h] at hn; simp at hn
+    have h_dropLast_len : suffix.dropLast.length = k := by
+      rw [List.length_dropLast, hn]; omega
+    rw [Substring.Raw.prevn.eq_2]
+    suffices h_prev_eq :
+        Substring.Raw.prev
+          ⟨String.ofList (prefix_list ++ suffix ++ extra),
+            (0 : String.Pos.Raw),
+            (⟨utf8Len (prefix_list ++ suffix ++ extra)⟩ : String.Pos.Raw)⟩
+          (⟨utf8Len (prefix_list ++ suffix)⟩ : String.Pos.Raw) =
+        (⟨utf8Len (prefix_list ++ suffix.dropLast)⟩ : String.Pos.Raw) by
+      rw [h_prev_eq]
+      have h_str_eq : prefix_list ++ suffix ++ extra =
+          prefix_list ++ suffix.dropLast ++ ([suffix.getLast h_ne] ++ extra) := by
+        suffices (prefix_list ++ suffix.dropLast) ++ ([suffix.getLast h_ne] ++ extra) =
+            (prefix_list ++ suffix) ++ extra by exact this.symm
+        rw [List.append_assoc prefix_list suffix.dropLast,
+            ← List.append_assoc suffix.dropLast [suffix.getLast h_ne] extra,
+            List.dropLast_concat_getLast h_ne, ← List.append_assoc]
+      have h_ss_eq :
+          (⟨String.ofList (prefix_list ++ suffix ++ extra),
+            (0 : String.Pos.Raw),
+            (⟨utf8Len (prefix_list ++ suffix ++ extra)⟩ : String.Pos.Raw)⟩ : Substring.Raw) =
+          ⟨String.ofList (prefix_list ++ suffix.dropLast ++ ([suffix.getLast h_ne] ++ extra)),
+            (0 : String.Pos.Raw),
+            (⟨utf8Len (prefix_list ++ suffix.dropLast ++ ([suffix.getLast h_ne] ++ extra))⟩ :
+              String.Pos.Raw)⟩ := by
+        congr 1
+        · exact congrArg String.ofList h_str_eq
+        · exact String.Pos.Raw.ext (congrArg utf8Len h_str_eq)
+      rw [h_ss_eq]
+      exact ih prefix_list suffix.dropLast ([suffix.getLast h_ne] ++ extra) h_dropLast_len
+    -- Prove h_prev_eq: prev at end gives position of suffix.dropLast end
+    have h_prev_compute : String.Pos.Raw.utf8PrevAux (prefix_list ++ suffix ++ extra) 0
+        (⟨utf8Len (prefix_list ++ suffix)⟩ : String.Pos.Raw) =
+        (⟨utf8Len (prefix_list ++ suffix.dropLast)⟩ : String.Pos.Raw) := by
+      have h_str_rw : prefix_list ++ suffix ++ extra =
+          ((prefix_list ++ suffix.dropLast) ++ [suffix.getLast h_ne]) ++ extra := by
+        suffices ((prefix_list ++ suffix.dropLast) ++ [suffix.getLast h_ne]) ++ extra =
+            (prefix_list ++ suffix) ++ extra by exact this.symm
+        congr 1; rw [List.append_assoc, List.dropLast_concat_getLast h_ne]
+      have h_len_rw : (⟨utf8Len (prefix_list ++ suffix)⟩ : String.Pos.Raw) =
+          (⟨utf8Len ((prefix_list ++ suffix.dropLast) ++ [suffix.getLast h_ne])⟩ :
+            String.Pos.Raw) := by
+        congr 1; congr 1
+        suffices (prefix_list ++ suffix.dropLast) ++ [suffix.getLast h_ne] = prefix_list ++ suffix by
+          exact this.symm
+        rw [List.append_assoc, List.dropLast_concat_getLast h_ne]
+      rw [show (prefix_list ++ suffix ++ extra : List Char) =
+          ((prefix_list ++ suffix.dropLast) ++ [suffix.getLast h_ne]) ++ extra from h_str_rw,
+          h_len_rw]
+      exact utf8PrevAux_last_with_extra (prefix_list ++ suffix.dropLast) (suffix.getLast h_ne) extra
+    -- Now connect Substring.Raw.prev to utf8PrevAux
+    unfold Substring.Raw.prev
+    simp only [String.Pos.Raw.offsetBy]
+    show (if (⟨(0 : String.Pos.Raw).byteIdx + utf8Len (prefix_list ++ suffix)⟩ : String.Pos.Raw) =
+            (0 : String.Pos.Raw) then _
+          else (⟨(String.Pos.Raw.prev (String.ofList (prefix_list ++ suffix ++ extra))
+            (⟨(0 : String.Pos.Raw).byteIdx + utf8Len (prefix_list ++ suffix)⟩ :
+              String.Pos.Raw)).byteIdx -
+            (0 : String.Pos.Raw).byteIdx⟩ : String.Pos.Raw)) = _
+    simp only [show (0 : String.Pos.Raw).byteIdx = (0 : Nat) from rfl,
+               Nat.zero_add, Nat.sub_zero]
+    have h_pos : 0 < utf8Len (prefix_list ++ suffix) := by
+      cases suffix with
+      | nil => exact absurd rfl h_ne
+      | cons c cs => simp only [utf8Len_append, utf8Len]; have := Char.utf8Size_pos c; omega
+    have h_ne_zero : (⟨utf8Len (prefix_list ++ suffix)⟩ : String.Pos.Raw) ≠
+        (0 : String.Pos.Raw) := by
+      intro h; have := congrArg String.Pos.Raw.byteIdx h; simp at this; omega
+    rw [if_neg h_ne_zero]
+    simp only [String.Pos.Raw.prev, String.toList_ofList]
+    exact congrArg (⟨·.byteIdx⟩ : String.Pos.Raw → String.Pos.Raw) h_prev_compute
 
 /-- Key lemma: prevn on full string steps back through suffix characters.
-    Prevn n from position p walks back n characters from p.
     For (prefix ++ suffix), walking back suffix.length from end lands at utf8Len prefix. -/
 private theorem prevn_full_string (prefix_list suffix : List Char) :
     Substring.Raw.prevn
@@ -436,11 +586,8 @@ private theorem prevn_full_string (prefix_list suffix : List Char) :
       suffix.length
       ⟨utf8Len (prefix_list ++ suffix)⟩ =
     ⟨utf8Len prefix_list⟩ := by
-  -- The proof requires tracking UTF-8 byte positions through prevn iterations.
-  -- Each prev step walks back through one character's UTF-8 encoding.
-  -- After suffix.length steps, we've walked back through all of suffix.
-  -- This is verified by SAN parsing tests at runtime.
-  sorry
+  have h := prevn_drops suffix.length prefix_list suffix [] rfl
+  simp only [List.append_nil] at h; exact h
 
 /--
 Key lemma: dropRight of append strips the suffix when lengths match.
@@ -471,9 +618,29 @@ theorem String.dropRight_append_right' (s t : String) :
   · rw [ht]
     simp only [String.append_empty, String.length_empty]
     exact dropRight_zero s
-  -- General case: prevn_full_string shows prevn lands at s.utf8ByteSize,
-  -- then extract_prefix gives s. The proof depends on prevn_full_string.
-  sorry
+  · -- General case: use prevn_full_string then extract_prefix
+    have h_prevn : Substring.Raw.prevn
+        { str := s ++ t, startPos := ⟨0⟩, stopPos := ⟨(s ++ t).utf8ByteSize⟩ }
+        t.length
+        ⟨(s ++ t).utf8ByteSize⟩ = ⟨s.utf8ByteSize⟩ := by
+      have h_str_eq : s ++ t = String.ofList (s.toList ++ t.toList) := by
+        rw [← String.toList_append]; exact String.ofList_toList.symm
+      have h_utf8_eq : (String.ofList (s.toList ++ t.toList)).utf8ByteSize =
+          utf8Len (s.toList ++ t.toList) :=
+        (utf8Len_eq_utf8ByteSize_ofList _).symm
+      have h_len_eq : t.length = t.toList.length :=
+        (String.length_toList (s := t)).symm
+      have h_utf8_s : s.utf8ByteSize = utf8Len s.toList :=
+        (utf8Len_eq_utf8ByteSize s).symm
+      rw [h_str_eq, h_utf8_eq, h_len_eq, h_utf8_s]
+      exact prevn_full_string s.toList t.toList
+    unfold String.dropRight
+    simp only [String.toRawSubstring, Substring.Raw.dropRight, String.rawEndPos,
+               Substring.Raw.bsize, String.Pos.Raw.offsetBy, Nat.zero_add]
+    simp only [show (s ++ t).utf8ByteSize.sub 0 = (s ++ t).utf8ByteSize from Nat.sub_zero _]
+    simp only [h_prevn]
+    show String.Pos.Raw.extract (s ++ t) ⟨0⟩ ⟨s.utf8ByteSize⟩ = s
+    exact extract_prefix s t
 
 /-- If we append a suffix and then dropRight by its length, we get the original -/
 theorem String.append_then_dropRight' (s suffix : String) :
@@ -507,25 +674,6 @@ theorem String.normalizeCastle_removes_zero' (s : String) :
     have hne : 'O' ≠ '0' := by decide
     exact hne hfc
   · simp only [hc, ↓reduceIte] at hfc
-
-/-! ## Section 8: endsWith lemmas -/
-
-/--
-Basic endsWith property via list suffix.
-
-String.endsWith checks if the string ends with the given suffix by comparing
-the last suffix.length characters. When we append a suffix, it trivially
-ends with that suffix.
-
-**Verification**: Confirmed via native_decide for concrete instances.
-Example: ("hello" ++ "world").endsWith "world" = true ✓
--/
-theorem String.endsWith_append' (s suffix : String) :
-    (s ++ suffix).endsWith suffix = true := by
-  -- String.endsWith compares the last suffix.utf8ByteSize bytes with suffix.
-  -- For (s ++ suffix), these bytes are exactly suffix, so endsWith returns true.
-  -- Verified by SAN parsing test suite.
-  sorry
 
 /-! ## Section 9: Three-part suffix strip -/
 
