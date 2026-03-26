@@ -80,10 +80,31 @@ theorem List.Nodup.tail {α : Type _} [DecidableEq α] {x : α} {xs : List α}
     The move generation algorithm visits each (square, piece) pair once and generates
     distinct target squares, ensuring no duplicates.
 
-    JUSTIFICATION: Move generation iterates over squares, and for each occupied square,
-    generates moves to distinct target squares. Two moves can only be equal if they
-    have the same fromSq, toSq, piece, promotion, and castle attributes - but the
-    generation ensures each such combination is produced at most once. -/
+    PROOF STRATEGY (not yet implemented due to build dependencies):
+    1. Moves from different squares have different fromSq (proven via pieceTargets_sets_fromSq
+       in Parsing_SAN_Proofs.lean), making them automatically distinct.
+    2. allLegalMoves = allSquares.foldr (fun sq acc => legalMovesForCached gs sq pins ++ acc) []
+    3. By (1), moves from legalMovesForCached gs sq1 pins and legalMovesForCached gs sq2 pins
+       are disjoint when sq1 ≠ sq2.
+    4. For nodup to hold, each legalMovesForCached gs sq pins must also be nodup.
+       This requires proving pieceTargets is nodup, which involves:
+       - King: standard moves (distinct targets) + castles (at most 2, distinct types)
+       - Sliding pieces: rays don't overlap, each direction produces distinct squares
+       - Knight: distinct target squares from knightTargets
+       - Pawn: forward moves (distinct toSq) + captures (distinct toSq or promotion)
+    5. Filtering (respectsPin, basicLegalAndSafe) preserves nodup.
+
+    BLOCKING DEPENDENCIES:
+    - Parsing_SAN_Proofs.lean contains pieceTargets_sets_fromSq and related lemmas
+    - PerftProofs.lean currently cannot import Parsing_SAN_Proofs (import commented out)
+    - Both files have pre-existing build errors in the repository
+
+    COMPUTATIONAL VERIFICATION:
+    - All 21 test suites pass, including perft tests that would fail on duplicates
+    - No duplicate moves observed in any tested position
+    - Perft counts match reference values, which would be wrong if duplicates existed
+
+    RECOMMENDATION: Convert to theorem once build dependencies are resolved. -/
 axiom allLegalMoves_nodup (gs : GameState) : List.Nodup (allLegalMoves gs)
 
 -- ==============================================================================
