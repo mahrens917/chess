@@ -241,7 +241,7 @@ theorem slidingTargets_walk_mem_isRookMove
                 if Rules.isEmpty board target = true then
                   Rules.slidingTargets.walk src p board color maxStep df dr s
                     ({ piece := p, fromSq := src, toSq := target } :: acc)
-                else if Rules.isEnemyNonKingAt board color target = true then
+                else if Rules.isEnemyAt board color target = true then
                   { piece := p, fromSq := src, toSq := target, isCapture := true } :: acc
                 else acc := by
         simpa [Rules.slidingTargets.walk] using hMem
@@ -353,7 +353,7 @@ theorem slidingTargets_walk_mem_isRookMove
                   exact hAcc x hIn
             have hLe' : s ≤ maxStep := Nat.le_trans (Nat.le_succ s) hLe
             exact ih ({ piece := p, fromSq := src, toSq := target } :: acc) m hLe' hAcc' hRec
-          · by_cases hEnemy : Rules.isEnemyNonKingAt board color target = true
+          · by_cases hEnemy : Rules.isEnemyAt board color target = true
             · have hMemCons :
                   m ∈ { piece := p, fromSq := src, toSq := target, isCapture := true } :: acc := by
                 simpa [hSq, hEmpty, hEnemy] using hMem'
@@ -395,7 +395,7 @@ theorem slidingTargets_walk_mem_isDiagonal
                 if Rules.isEmpty board target = true then
                   Rules.slidingTargets.walk src p board color maxStep df dr s
                     ({ piece := p, fromSq := src, toSq := target } :: acc)
-                else if Rules.isEnemyNonKingAt board color target = true then
+                else if Rules.isEnemyAt board color target = true then
                   { piece := p, fromSq := src, toSq := target, isCapture := true } :: acc
                 else acc := by
         simpa [Rules.slidingTargets.walk] using hMem
@@ -431,7 +431,7 @@ theorem slidingTargets_walk_mem_isDiagonal
                   exact hAcc x hIn
             have hLe' : s ≤ maxStep := Nat.le_trans (Nat.le_succ s) hLe
             exact ih ({ piece := p, fromSq := src, toSq := target } :: acc) m hLe' hAcc' hRec
-          · by_cases hEnemy : Rules.isEnemyNonKingAt board color target = true
+          · by_cases hEnemy : Rules.isEnemyAt board color target = true
             · have hMemCons :
                   m ∈ { piece := p, fromSq := src, toSq := target, isCapture := true } :: acc := by
                 simpa [hSq, hEmpty, hEnemy] using hMem'
@@ -667,7 +667,7 @@ theorem slidingTargets_walk_mem_isQueenMove
                 if Rules.isEmpty board target = true then
                   Rules.slidingTargets.walk src p board color maxStep df dr s
                     ({ piece := p, fromSq := src, toSq := target } :: acc)
-                else if Rules.isEnemyNonKingAt board color target = true then
+                else if Rules.isEnemyAt board color target = true then
                   { piece := p, fromSq := src, toSq := target, isCapture := true } :: acc
                 else acc := by
         simpa [Rules.slidingTargets.walk] using hMem
@@ -709,7 +709,7 @@ theorem slidingTargets_walk_mem_isQueenMove
                   exact hAcc x hIn
             have hLe' : s ≤ maxStep := Nat.le_trans (Nat.le_succ s) hLe
             exact ih ({ piece := p, fromSq := src, toSq := target } :: acc) m hLe' hAcc' hRec
-          · by_cases hEnemy : Rules.isEnemyNonKingAt board color target = true
+          · by_cases hEnemy : Rules.isEnemyAt board color target = true
             · have hMemCons :
                   m ∈ { piece := p, fromSq := src, toSq := target, isCapture := true } :: acc := by
                 simpa [hSq, hEmpty, hEnemy] using hMem'

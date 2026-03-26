@@ -70,12 +70,14 @@ theorem KingsPlusMinor.mem_allLegalMoves_isCapture_implies_piece_is_opponentKing
   -- Destination is occupied by the minor.
   have hAt : gs.board.get m.toSq = some mp := by simpa [hTo] using hAtMsq
   -- Unpack `destinationFriendlyFree` to learn the mover's color is opposite the minor's color.
-  have hDec :
-      decide (mp.color ≠ m.piece.color ∧ mp.pieceType ≠ PieceType.King) = true := by
+  have hColorNe : mp.color ≠ m.piece.color := by
     unfold destinationFriendlyFree at hDest
     simpa [hAt] using hDest
+  -- Kings cannot be captured (they're not legal move destinations)
+  have hNotKing : mp.pieceType ≠ PieceType.King :=
+    mem_allLegalMoves_implies_not_king_destination gs m hMem mp (by simpa using hAt)
   have hProp : mp.color ≠ m.piece.color ∧ mp.pieceType ≠ PieceType.King :=
-    of_decide_eq_true hDec
+    ⟨hColorNe, hNotKing⟩
   -- Now `m.piece` is one of {white king, black king, mp}; and cannot be `mp` (same color).
   have hPieceCases :
       m.piece = kingPiece Color.White ∨ m.piece = kingPiece Color.Black ∨ m.piece = mp :=

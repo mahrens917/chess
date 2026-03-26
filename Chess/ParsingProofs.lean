@@ -748,11 +748,10 @@ theorem List.find?_eq_some_of_exists {α : Type _} {p : α → Prop} [DecidableP
         obtain ⟨y, hy⟩ := ih hxrest
         exact ⟨y, by simp [List.find?, hpa, hy]⟩
 
--- TODO: Proof needs update for current API (do-notation in theorem type causes issues)
--- theorem applyLegalMoves_cons (gs : GameState) (m : Move) (rest : List Move) :
---     Rules.applyLegalMoves gs (m :: rest) = do
---       let next ← Rules.applyLegalMove gs m
---       Rules.applyLegalMoves next rest := by sorry
+theorem applyLegalMoves_cons (gs : GameState) (m : Move) (rest : List Move) :
+    Rules.applyLegalMoves gs (m :: rest) =
+      (Rules.applyLegalMove gs m >>= fun next => Rules.applyLegalMoves next rest) := by
+  simp [Rules.applyLegalMoves]
 
 theorem Except.exists_ok_of_bind_ok {ε α β : Type _}
     {f : Except ε α} {g : α → Except ε β} {b : β}
@@ -768,6 +767,598 @@ theorem Except.exists_ok_of_bind_ok {ε α β : Type _}
 -- TODO: The following theorems reference functions (PGNScaffold, assemblePGNGame,
 -- buildPGNScaffold, reconcileFinalState, etc.) that have been removed from the codebase.
 -- These proofs need to be rewritten once the new parsing architecture is stabilized.
+
+-- ============================================================================
+-- Structural properties of generated moves
+-- ============================================================================
+-- These lemmas state that moves constructed by the standard filterMap pattern,
+-- slidingTargets, and pawn pieceTargets have their isCastle/isEnPassant fields
+-- set to the default value (false), since those fields are only explicitly set
+-- by castleMoveIfLegal and en passant logic respectively.
+--
+-- NOTE: These are stub declarations to unblock the build of downstream modules
+-- (SemanticMoveFlagLemmas, KMinorMoveLemmas, etc.). They encode true facts about
+-- the move generation code: the Move struct defaults isCastle/isEnPassant to false,
+-- and these generators never set those fields.
+
+open Rules in
+theorem mem_standardFilterMap_isCastle_false
+    (gs : GameState) (src : Square) (p : Piece)
+    (targets : List Square) (m : Move) :
+    m ∈ targets.filterMap (fun target =>
+        if destinationFriendlyFree gs { piece := p, fromSq := src, toSq := target } then
+          match gs.board target with
+          | some _ => some { piece := p, fromSq := src, toSq := target, isCapture := true }
+          | none => some { piece := p, fromSq := src, toSq := target }
+        else
+          none) →
+    m.isCastle = false := by
+  intro hMem
+  rcases List.mem_filterMap.1 hMem with ⟨target, _, hSome⟩
+  cases hFree : destinationFriendlyFree gs { piece := p, fromSq := src, toSq := target } <;>
+    simp [hFree] at hSome
+  cases hBoard : gs.board target <;> simp [hFree, hBoard] at hSome
+  all_goals (subst hSome; rfl)
+
+open Rules in
+theorem mem_standardFilterMap_isEnPassant_false
+    (gs : GameState) (src : Square) (p : Piece)
+    (targets : List Square) (m : Move) :
+    m ∈ targets.filterMap (fun target =>
+        if destinationFriendlyFree gs { piece := p, fromSq := src, toSq := target } then
+          match gs.board target with
+          | some _ => some { piece := p, fromSq := src, toSq := target, isCapture := true }
+          | none => some { piece := p, fromSq := src, toSq := target }
+        else
+          none) →
+    m.isEnPassant = false := by
+  intro hMem
+  rcases List.mem_filterMap.1 hMem with ⟨target, _, hSome⟩
+  cases hFree : destinationFriendlyFree gs { piece := p, fromSq := src, toSq := target } <;>
+    simp [hFree] at hSome
+  cases hBoard : gs.board target <;> simp [hFree, hBoard] at hSome
+  all_goals (subst hSome; rfl)
+
+open Rules in
+theorem castleMoveIfLegal_pieceType
+    (gs : GameState) (kingSide : Bool) (m : Move) :
+    castleMoveIfLegal gs kingSide = some m →
+    m.piece.pieceType = PieceType.King := by
+  intro h
+  unfold castleMoveIfLegal at h
+  simp only at h
+  split at h <;> simp at h
+  split at h <;> simp at h
+  rename_i k r _ _
+  split at h <;> simp at h
+  rename_i hAnd
+  split at h <;> simp at h
+  subst h
+  exact hAnd.1
+
+open Rules in
+theorem castleMoveIfLegal_isEnPassant_false
+    (gs : GameState) (kingSide : Bool) (m : Move) :
+    castleMoveIfLegal gs kingSide = some m →
+    m.isEnPassant = false := by
+  intro h
+  unfold castleMoveIfLegal at h
+  simp only at h
+  split at h <;> simp at h
+  split at h <;> simp at h
+  split at h <;> simp at h
+  split at h <;> simp at h
+  subst h
+  rfl
+
+private theorem walk_isCastle_false
+    (src : Square) (p : Piece) (board : Board) (color : Color)
+    (maxStep : Nat) (df dr : Int) (step : Nat) (acc : List Move) (m : Move)
+    (hAcc : ∀ x ∈ acc, x.isCastle = false)
+    (hMem : m ∈ Rules.slidingTargets.walk src p board color maxStep df dr step acc) :
+    m.isCastle = false := by
+  induction step generalizing acc with
+  | zero =>
+    simp [Rules.slidingTargets.walk] at hMem
+    exact hAcc m hMem
+  | succ s ih =>
+    simp [Rules.slidingTargets.walk] at hMem
+    split at hMem
+    · exact hAcc m hMem
+    · rename_i target _
+      split at hMem
+      · exact ih _ (fun x hx => by
+            rcases List.mem_cons.mp hx with h | h
+            · subst h; rfl
+            · exact hAcc x h) hMem
+      · split at hMem
+        · rcases List.mem_cons.mp hMem with h | h
+          · subst h; rfl
+          · exact hAcc m h
+        · exact hAcc m hMem
+
+open Rules in
+theorem mem_slidingTargets_isCastle_false
+    (gs : GameState) (src : Square) (p : Piece)
+    (deltas : List (Int × Int)) (m : Move) :
+    m ∈ slidingTargets gs src p deltas →
+    m.isCastle = false := by
+  intro hMem
+  unfold slidingTargets at hMem
+  simp only at hMem
+  -- slidingTargets = deltas.foldr (fun d acc => walk ...) []
+  -- We prove the property is preserved through the foldr
+  suffices ∀ (acc : List Move),
+      (∀ x ∈ acc, x.isCastle = false) →
+      (∀ x ∈ deltas.foldr (fun d acc =>
+          let (df, dr) := d
+          slidingTargets.walk src p gs.board p.color 7 df dr 7 acc) acc,
+        x.isCastle = false) by
+    exact this [] (fun _ h => by cases h) m hMem
+  intro acc hAcc
+  induction deltas with
+  | nil => simpa using hAcc
+  | cons d ds ih =>
+    intro x hx
+    simp [List.foldr] at hx
+    exact walk_isCastle_false src p gs.board p.color 7 d.1 d.2 7 _ x
+      (fun y hy => ih (fun z hz => hAcc z hz) y hy) hx
+
+private theorem walk_isEnPassant_false
+    (src : Square) (p : Piece) (board : Board) (color : Color)
+    (maxStep : Nat) (df dr : Int) (step : Nat) (acc : List Move) (m : Move)
+    (hAcc : ∀ x ∈ acc, x.isEnPassant = false)
+    (hMem : m ∈ Rules.slidingTargets.walk src p board color maxStep df dr step acc) :
+    m.isEnPassant = false := by
+  induction step generalizing acc with
+  | zero =>
+    simp [Rules.slidingTargets.walk] at hMem
+    exact hAcc m hMem
+  | succ s ih =>
+    simp [Rules.slidingTargets.walk] at hMem
+    split at hMem
+    · exact hAcc m hMem
+    · rename_i target _
+      split at hMem
+      · exact ih _ (fun x hx => by
+            rcases List.mem_cons.mp hx with h | h
+            · subst h; rfl
+            · exact hAcc x h) hMem
+      · split at hMem
+        · rcases List.mem_cons.mp hMem with h | h
+          · subst h; rfl
+          · exact hAcc m h
+        · exact hAcc m hMem
+
+open Rules in
+theorem mem_slidingTargets_isEnPassant_false
+    (gs : GameState) (src : Square) (p : Piece)
+    (deltas : List (Int × Int)) (m : Move) :
+    m ∈ slidingTargets gs src p deltas →
+    m.isEnPassant = false := by
+  intro hMem
+  unfold slidingTargets at hMem
+  simp only at hMem
+  suffices ∀ (acc : List Move),
+      (∀ x ∈ acc, x.isEnPassant = false) →
+      (∀ x ∈ deltas.foldr (fun d acc =>
+          let (df, dr) := d
+          slidingTargets.walk src p gs.board p.color 7 df dr 7 acc) acc,
+        x.isEnPassant = false) by
+    exact this [] (fun _ h => by cases h) m hMem
+  intro acc hAcc
+  induction deltas with
+  | nil => simpa using hAcc
+  | cons d ds ih =>
+    intro x hx
+    simp [List.foldr] at hx
+    exact walk_isEnPassant_false src p gs.board p.color 7 d.1 d.2 7 _ x
+      (fun y hy => ih (fun z hz => hAcc z hz) y hy) hx
+
+private theorem promotionMoves_isCastle (m m' : Move) :
+    m' ∈ Rules.promotionMoves m → m'.isCastle = m.isCastle := by
+  intro hmem
+  unfold Rules.promotionMoves at hmem
+  split at hmem
+  · simp only [List.mem_map] at hmem
+    obtain ⟨_, _, heq⟩ := hmem
+    simp [← heq]
+  · simp only [List.mem_singleton] at hmem
+    simp [hmem]
+
+private theorem mem_pawn_captureMoves_isCastle_false
+    (gs : GameState) (src : Square) (p : Piece)
+    (offsets : List Int) (m : Move) :
+    m ∈ offsets.foldr
+        (fun df acc =>
+          match Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection p.color) with
+          | some target =>
+              if Rules.isEnemyAt gs.board p.color target then
+                Rules.promotionMoves { piece := p, fromSq := src, toSq := target, isCapture := true } ++ acc
+              else if gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target then
+                { piece := p, fromSq := src, toSq := target, isCapture := true, isEnPassant := true } :: acc
+              else
+                acc
+          | none => acc)
+        [] →
+    m.isCastle = false := by
+  intro hmem
+  induction offsets with
+  | nil => simp at hmem
+  | cons df rest ih =>
+    simp only [List.foldr_cons] at hmem
+    cases hsq : Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection p.color) with
+    | none => simp only [hsq] at hmem; exact ih hmem
+    | some target =>
+      simp only [hsq] at hmem
+      by_cases henemy : Rules.isEnemyAt gs.board p.color target = true
+      · simp only [henemy, ↓reduceIte] at hmem
+        rw [List.mem_append] at hmem
+        rcases hmem with hpromo | hrest
+        · have := promotionMoves_isCastle _ _ hpromo; simp at this; exact this
+        · exact ih hrest
+      · simp only [henemy, Bool.false_eq_true, ↓reduceIte] at hmem
+        by_cases hep : gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target
+        · rw [if_pos hep] at hmem
+          rw [List.mem_cons] at hmem
+          rcases hmem with rfl | hrest
+          · rfl
+          · exact ih hrest
+        · rw [if_neg hep] at hmem
+          exact ih hmem
+
+open Rules in
+theorem mem_pawn_pieceTargets_isCastle_false
+    (gs : GameState) (src : Square) (p : Piece)
+    (m : Move) :
+    p.pieceType = PieceType.Pawn →
+    m ∈ pieceTargets gs src p →
+    m.isCastle = false := by
+  intro hPawn hMem
+  simp [pieceTargets, hPawn] at hMem
+  -- hMem : m ∈ forwardMoves.foldr promotionMoves [] ++ captureMoves
+  rw [List.mem_append] at hMem
+  rcases hMem with hFwd | hCap
+  · -- In forwardMoves foldr of promotionMoves
+    -- Every base forward move has isCastle = false, promotionMoves preserves it
+    have hBase : ∀ (moves : List Move),
+        (∀ x ∈ moves, x.isCastle = false) →
+        ∀ x ∈ moves.foldr (fun mv acc => promotionMoves mv ++ acc) [],
+          x.isCastle = false := by
+      intro moves hAll x hx
+      induction moves with
+      | nil => simp at hx
+      | cons a as ih =>
+        simp [List.foldr] at hx
+        rw [List.mem_append] at hx
+        rcases hx with hp | hr
+        · have := promotionMoves_isCastle a x hp
+          rw [this]
+          exact hAll a (List.mem_cons_self a as)
+        · exact ih (fun y hy => hAll y (List.mem_cons_of_mem a hy)) hr
+    apply hBase
+    -- Show all forward moves have isCastle = false
+    intro x hx
+    -- Forward moves are constructed with default isCastle
+    simp only at hx
+    split at hx
+    · rename_i target _
+      split at hx
+      · rw [List.mem_append] at hx
+        rcases hx with h | h
+        · simp [List.mem_singleton] at h; subst h; rfl
+        · split at h
+          · split at h
+            · rename_i target2 _
+              split at h
+              · simp [List.mem_singleton] at h; subst h; rfl
+              · simp at h
+            · simp at h
+          · simp at h
+      · simp at hx
+    · simp at hx
+    · exact hFwd
+  · -- In captureMoves
+    exact mem_pawn_captureMoves_isCastle_false gs src p [-1, 1] m hCap
+
+private theorem promotionMoves_piece_fromSq' (m m' : Move) :
+    m' ∈ Rules.promotionMoves m → m'.piece = m.piece ∧ m'.fromSq = m.fromSq := by
+  intro hmem
+  unfold Rules.promotionMoves at hmem
+  split at hmem
+  · simp only [List.mem_map] at hmem
+    obtain ⟨_, _, heq⟩ := hmem
+    simp [← heq]
+  · simp only [List.mem_singleton] at hmem
+    simp [hmem]
+
+private theorem mem_pawn_captureMoves_piece_fromSq
+    (gs : GameState) (src : Square) (p : Piece)
+    (offsets : List Int) (m : Move) :
+    m ∈ offsets.foldr
+        (fun df acc =>
+          match Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection p.color) with
+          | some target =>
+              if Rules.isEnemyAt gs.board p.color target then
+                Rules.promotionMoves { piece := p, fromSq := src, toSq := target, isCapture := true } ++ acc
+              else if gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target then
+                { piece := p, fromSq := src, toSq := target, isCapture := true, isEnPassant := true } :: acc
+              else
+                acc
+          | none => acc)
+        [] →
+    m.piece = p ∧ m.fromSq = src := by
+  intro hmem
+  induction offsets with
+  | nil => simp at hmem
+  | cons df rest ih =>
+    simp only [List.foldr_cons] at hmem
+    cases hsq : Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection p.color) with
+    | none => simp only [hsq] at hmem; exact ih hmem
+    | some target =>
+      simp only [hsq] at hmem
+      by_cases henemy : Rules.isEnemyAt gs.board p.color target = true
+      · simp only [henemy, ↓reduceIte] at hmem
+        rw [List.mem_append] at hmem
+        rcases hmem with hpromo | hrest
+        · exact promotionMoves_piece_fromSq' _ _ hpromo
+        · exact ih hrest
+      · simp only [henemy, Bool.false_eq_true, ↓reduceIte] at hmem
+        by_cases hep : gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target
+        · rw [if_pos hep] at hmem
+          rw [List.mem_cons] at hmem
+          rcases hmem with rfl | hrest
+          · exact ⟨rfl, rfl⟩
+          · exact ih hrest
+        · rw [if_neg hep] at hmem
+          exact ih hmem
+
+open Rules in
+theorem mem_pawn_pieceTargets_piece_fromSq
+    (gs : GameState) (src : Square) (p : Piece)
+    (m : Move) :
+    p.pieceType = PieceType.Pawn →
+    m ∈ pieceTargets gs src p →
+    m.piece = p ∧ m.fromSq = src := by
+  intro hPawn hMem
+  simp [pieceTargets, hPawn] at hMem
+  rw [List.mem_append] at hMem
+  rcases hMem with hFwd | hCap
+  · -- In forwardMoves foldr of promotionMoves
+    have hBase : ∀ (moves : List Move),
+        (∀ x ∈ moves, x.piece = p ∧ x.fromSq = src) →
+        ∀ x ∈ moves.foldr (fun mv acc => promotionMoves mv ++ acc) [],
+          x.piece = p ∧ x.fromSq = src := by
+      intro moves hAll x hx
+      induction moves with
+      | nil => simp at hx
+      | cons a as ih =>
+        simp [List.foldr] at hx
+        rw [List.mem_append] at hx
+        rcases hx with hp | hr
+        · have ⟨hp1, hp2⟩ := promotionMoves_piece_fromSq' a x hp
+          have ⟨ha1, ha2⟩ := hAll a (List.mem_cons_self a as)
+          exact ⟨hp1.trans ha1, hp2.trans ha2⟩
+        · exact ih (fun y hy => hAll y (List.mem_cons_of_mem a hy)) hr
+    apply hBase
+    -- Show all forward moves have piece = p and fromSq = src
+    intro x hx
+    simp only at hx
+    split at hx
+    · rename_i target _
+      split at hx
+      · rw [List.mem_append] at hx
+        rcases hx with h | h
+        · simp [List.mem_singleton] at h; subst h; exact ⟨rfl, rfl⟩
+        · split at h
+          · split at h
+            · rename_i target2 _
+              split at h
+              · simp [List.mem_singleton] at h; subst h; exact ⟨rfl, rfl⟩
+              · simp at h
+            · simp at h
+          · simp at h
+      · simp at hx
+    · simp at hx
+    · exact hFwd
+  · exact mem_pawn_captureMoves_piece_fromSq gs src p [-1, 1] m hCap
+
+end Parsing
+
+namespace Parsing
+
+open Rules
+
+private theorem walk_piece_fromSq
+    (src : Square) (p : Piece) (board : Board) (color : Color)
+    (maxStep : Nat) (df dr : Int) (step : Nat) (acc : List Move) (m : Move)
+    (hAcc : ∀ x ∈ acc, x.piece = p ∧ x.fromSq = src)
+    (hMem : m ∈ Rules.slidingTargets.walk src p board color maxStep df dr step acc) :
+    m.piece = p ∧ m.fromSq = src := by
+  induction step generalizing acc with
+  | zero =>
+    simp [Rules.slidingTargets.walk] at hMem
+    exact hAcc m hMem
+  | succ s ih =>
+    simp [Rules.slidingTargets.walk] at hMem
+    split at hMem
+    · exact hAcc m hMem
+    · rename_i target _
+      split at hMem
+      · exact ih _ (fun x hx => by
+            rcases List.mem_cons.mp hx with h | h
+            · subst h; exact ⟨rfl, rfl⟩
+            · exact hAcc x h) hMem
+      · split at hMem
+        · rcases List.mem_cons.mp hMem with h | h
+          · subst h; exact ⟨rfl, rfl⟩
+          · exact hAcc m h
+        · exact hAcc m hMem
+
+private theorem mem_slidingTargets_piece_fromSq
+    (gs : GameState) (src : Square) (p : Piece)
+    (deltas : List (Int × Int)) (m : Move) :
+    m ∈ Rules.slidingTargets gs src p deltas →
+    m.piece = p ∧ m.fromSq = src := by
+  intro hMem
+  unfold Rules.slidingTargets at hMem
+  simp only at hMem
+  suffices ∀ (acc : List Move),
+      (∀ x ∈ acc, x.piece = p ∧ x.fromSq = src) →
+      (∀ x ∈ deltas.foldr (fun d acc =>
+          let (df, dr) := d
+          Rules.slidingTargets.walk src p gs.board p.color 7 df dr 7 acc) acc,
+        x.piece = p ∧ x.fromSq = src) by
+    exact this [] (fun _ h => by cases h) m hMem
+  intro acc hAcc
+  induction deltas with
+  | nil => simpa using hAcc
+  | cons d ds ih =>
+    intro x hx
+    simp [List.foldr] at hx
+    exact walk_piece_fromSq src p gs.board p.color 7 d.1 d.2 7 _ x
+      (fun y hy => ih (fun z hz => hAcc z hz) y hy) hx
+
+private theorem mem_standardFilterMap_piece_fromSq
+    (gs : GameState) (src : Square) (p : Piece)
+    (targets : List Square) (m : Move) :
+    m ∈ targets.filterMap (fun target =>
+        if Rules.destinationFriendlyFree gs { piece := p, fromSq := src, toSq := target } then
+          match gs.board target with
+          | some _ => some { piece := p, fromSq := src, toSq := target, isCapture := true }
+          | none => some { piece := p, fromSq := src, toSq := target }
+        else
+          none) →
+    m.piece = p ∧ m.fromSq = src := by
+  intro hMem
+  rcases List.mem_filterMap.1 hMem with ⟨target, _, hSome⟩
+  cases hFree : Rules.destinationFriendlyFree gs { piece := p, fromSq := src, toSq := target } <;>
+    simp [hFree] at hSome
+  cases hBoard : gs.board target <;> simp [hFree, hBoard] at hSome
+  all_goals (subst hSome; exact ⟨rfl, rfl⟩)
+
+/-- If a move in pieceTargets has isCastle = true, then it came from castleMoveIfLegal. -/
+theorem mem_pieceTargets_castle_exists
+    (gs : GameState) (src : Square) (p : Piece) (m : Move) :
+    m ∈ pieceTargets gs src p →
+    m.isCastle = true →
+    ∃ kingSide, castleMoveIfLegal gs kingSide = some m := by
+  intro hMem hCastle
+  cases hPt : p.pieceType with
+  | King =>
+    have hMem' :
+        m ∈
+          (Movement.kingTargets src).filterMap (fun target =>
+              if destinationFriendlyFree gs { piece := p, fromSq := src, toSq := target } then
+                match gs.board target with
+                | some _ => some { piece := p, fromSq := src, toSq := target, isCapture := true }
+                | none => some { piece := p, fromSq := src, toSq := target }
+              else
+                none) ++
+            ([castleMoveIfLegal gs true, castleMoveIfLegal gs false]).filterMap id := by
+      simpa [pieceTargets, hPt] using hMem
+    cases List.mem_append.1 hMem' with
+    | inl hStd =>
+      have : m.isCastle = false :=
+        Chess.Parsing.mem_standardFilterMap_isCastle_false gs src p (Movement.kingTargets src) m hStd
+      simp [hCastle] at this
+    | inr hCastles =>
+      rcases (List.mem_filterMap.1 hCastles) with ⟨opt, hOptMem, hOptEq⟩
+      have hOptSome : opt = some m := by simpa using hOptEq
+      have hOptCases : opt = castleMoveIfLegal gs true ∨ opt = castleMoveIfLegal gs false := by
+        simpa using hOptMem
+      cases hOptCases with
+      | inl hOpt => exact ⟨true, by rw [← hOpt]; exact hOptSome⟩
+      | inr hOpt => exact ⟨false, by rw [← hOpt]; exact hOptSome⟩
+  | Queen =>
+    have hMem' := by simpa [pieceTargets, hPt] using hMem
+    have := Chess.Parsing.mem_slidingTargets_isCastle_false gs src p _ m hMem'
+    simp [hCastle] at this
+  | Rook =>
+    have hMem' := by simpa [pieceTargets, hPt] using hMem
+    have := Chess.Parsing.mem_slidingTargets_isCastle_false gs src p _ m hMem'
+    simp [hCastle] at this
+  | Bishop =>
+    have hMem' := by simpa [pieceTargets, hPt] using hMem
+    have := Chess.Parsing.mem_slidingTargets_isCastle_false gs src p _ m hMem'
+    simp [hCastle] at this
+  | Knight =>
+    have hMem' := by simpa [pieceTargets, hPt] using hMem
+    have : m.isCastle = false :=
+      Chess.Parsing.mem_standardFilterMap_isCastle_false gs src p (Movement.knightTargets src) m hMem'
+    simp [hCastle] at this
+  | Pawn =>
+    have : m.isCastle = false :=
+      Chess.Parsing.mem_pawn_pieceTargets_isCastle_false gs src p m hPt hMem
+    simp [hCastle] at this
+
+/-- For non-castle moves in pieceTargets, the move's piece and fromSq match. -/
+theorem mem_pieceTargets_piece_fromSq_of_not_castle
+    (gs : GameState) (src : Square) (p : Piece) (m : Move) :
+    m ∈ pieceTargets gs src p →
+    m.isCastle = false →
+    m.piece = p ∧ m.fromSq = src := by
+  intro hMem hNotCastle
+  cases hPt : p.pieceType with
+  | King =>
+    have hMem' :
+        m ∈
+          (Movement.kingTargets src).filterMap (fun target =>
+              if destinationFriendlyFree gs { piece := p, fromSq := src, toSq := target } then
+                match gs.board target with
+                | some _ => some { piece := p, fromSq := src, toSq := target, isCapture := true }
+                | none => some { piece := p, fromSq := src, toSq := target }
+              else
+                none) ++
+            ([castleMoveIfLegal gs true, castleMoveIfLegal gs false]).filterMap id := by
+      simpa [pieceTargets, hPt] using hMem
+    cases List.mem_append.1 hMem' with
+    | inl hStd =>
+      exact mem_standardFilterMap_piece_fromSq gs src p (Movement.kingTargets src) m hStd
+    | inr hCastles =>
+      rcases (List.mem_filterMap.1 hCastles) with ⟨opt, hOptMem, hOptEq⟩
+      have hOptSome : opt = some m := by simpa using hOptEq
+      have hOptCases : opt = castleMoveIfLegal gs true ∨ opt = castleMoveIfLegal gs false := by
+        simpa using hOptMem
+      -- Castle moves have isCastle = true, contradicting hNotCastle
+      cases hOptCases with
+      | inl hOpt =>
+        have hCM : castleMoveIfLegal gs true = some m := by rw [← hOpt]; exact hOptSome
+        -- Extract that m.isCastle = true from the definition
+        have : m.isCastle = true := by
+          unfold castleMoveIfLegal at hCM
+          simp only at hCM
+          split at hCM <;> simp at hCM
+          split at hCM <;> simp at hCM
+          split at hCM <;> simp at hCM
+          split at hCM <;> simp at hCM
+          subst hCM; rfl
+        simp [hNotCastle] at this
+      | inr hOpt =>
+        have hCM : castleMoveIfLegal gs false = some m := by rw [← hOpt]; exact hOptSome
+        have : m.isCastle = true := by
+          unfold castleMoveIfLegal at hCM
+          simp only at hCM
+          split at hCM <;> simp at hCM
+          split at hCM <;> simp at hCM
+          split at hCM <;> simp at hCM
+          split at hCM <;> simp at hCM
+          subst hCM; rfl
+        simp [hNotCastle] at this
+  | Queen =>
+    have hMem' := by simpa [pieceTargets, hPt] using hMem
+    exact mem_slidingTargets_piece_fromSq gs src p _ m hMem'
+  | Rook =>
+    have hMem' := by simpa [pieceTargets, hPt] using hMem
+    exact mem_slidingTargets_piece_fromSq gs src p _ m hMem'
+  | Bishop =>
+    have hMem' := by simpa [pieceTargets, hPt] using hMem
+    exact mem_slidingTargets_piece_fromSq gs src p _ m hMem'
+  | Knight =>
+    have hMem' := by simpa [pieceTargets, hPt] using hMem
+    exact mem_standardFilterMap_piece_fromSq gs src p (Movement.knightTargets src) m hMem'
+  | Pawn =>
+    exact Chess.Parsing.mem_pawn_pieceTargets_piece_fromSq gs src p m hPt hMem
 
 end Parsing
 end Chess

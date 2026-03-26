@@ -1924,11 +1924,9 @@ theorem pawnCapture_in_captureMoves (gs : GameState) (m : Move)
       · exact h
     -- Move equality: m equals the EP move literal
     obtain ⟨h_rf, h_rt⟩ := h_rook_none
-    have h_m_eq : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq,
-        isCapture := true, isEnPassant := true } := by
-      cases m; simp only [Move.mk.injEq]
-      refine ⟨rfl, rfl, rfl, ?_, ?_, ?_, ?_, ?_, ?_⟩
-      all_goals (first | rfl | exact Eq.symm (by assumption) | simp_all)
+    have h_m_eq : m = ({ piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true, isEnPassant := true } : Move) := by
+      cases m; simp only [Move.mk.injEq] at *
+      simp_all
     -- Monotonicity: membership is preserved through foldr steps
     have h_mono : ∀ (x : Int) (acc : List Move) (mv : Move), mv ∈ acc →
       mv ∈ (match Movement.squareFromInts (m.fromSq.fileInt + x)
@@ -1962,10 +1960,11 @@ theorem pawnCapture_in_captureMoves (gs : GameState) (m : Move)
           else acc
         | none => acc) := by
       intro acc
-      simp only [h_sq_eq, h_not_enemy, ↓reduceIte]
+      simp only [h_sq_eq]
+      rw [if_neg (by simp [h_not_enemy])]
       rw [if_pos ⟨h_ep_tgt, h_ep_emp⟩]
-      rw [← h_m_eq]
-      exact List.mem_cons_self _ _
+      have : m = { piece := m.piece, fromSq := m.fromSq, toSq := m.toSq, isCapture := true, isEnPassant := true : Move} := h_m_eq
+      rw [this]; exact List.Mem.head _
     -- Unfold foldr for [-1, 1] and combine
     show m ∈ ([-1, 1] : List Int).foldr (fun df' acc =>
       match Movement.squareFromInts (m.fromSq.fileInt + df')

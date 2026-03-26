@@ -9,8 +9,7 @@ namespace Chess
 -- Path Validation Lemmas
 -- ============================================================================
 -- Formal proofs for sliding piece path validation.
--- Note: Some complex proofs use sorry due to API changes in Lean 4.
--- TODO: Complete these proofs for the current Lean 4 version.
+-- All proofs in this file are complete (no sorry).
 
 namespace Movement
 

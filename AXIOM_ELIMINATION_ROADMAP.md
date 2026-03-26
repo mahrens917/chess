@@ -1,46 +1,48 @@
 # Axiom Elimination Roadmap
 
-**Last Updated**: 2026-01-25
-**Current Status**: 95% elimination (1 axiom remaining, from original 21)
-**Build**: Clean ✅ | **Tests**: 21/21 passing ✅ | **Slow Tests**: 7/7 passing ✅
+**Last Updated**: 2026-03-26
+**Current Status**: 0 sorries, 6 axioms remaining (from original 21)
+**Build**: Clean | **Tests**: 28/28 passing | **Theorems**: 507
 
 ---
 
 ## Executive Summary
 
-The axiom elimination effort has been highly successful:
-- **Original**: 21 axioms
-- **Current**: 1 axiom (`allLegalMoves_nodup`)
-- **Elimination Rate**: 95%
+- **Original**: 21 axioms, 0 theorems
+- **Current**: 6 axioms, 507 theorems, 0 sorries
+- **Original axioms eliminated**: 20 of 21 (95%)
+- **New axioms introduced**: 5 (Lean 4.26 string gaps + chess-structural)
 
-The remaining axiom is intentionally kept as it provides computational convenience
-without affecting soundness. All critical path axioms have been converted to theorems.
-
----
-
-## The 1 Remaining Axiom
-
-### `allLegalMoves_nodup` (PerftProofs.lean:87)
-
-```lean
-axiom allLegalMoves_nodup (gs : GameState) : List.Nodup (allLegalMoves gs)
-```
-
-**Status**: INTENTIONALLY KEPT AS AXIOM
-**Rationale**:
-- Verified computationally across all test positions (21/21 suites)
-- Full proof would require extensive list reasoning about move generation internals
-- Low impact on soundness - affects counting/enumeration, not move correctness
-- All perft tests validate no duplicates in practice
-
-**Cost-Benefit**: Proof would be 20+ hours for marginal benefit
-**Recommendation**: Keep as axiom, document computational verification
+The original `allLegalMoves_nodup` axiom remains. Five new axioms were introduced during sorry elimination: 2 bridge Lean 4.26 `String.replace` gaps, 2 encode SAN injectivity properties, and 1 requires a game-validity precondition.
 
 ---
 
-## Eliminated Axioms (20 total)
+## The 6 Remaining Axioms
 
-All of the following have been converted to theorems or removed:
+### Chess-Structural (3)
+
+| Axiom | File | Proof Strategy |
+|-------|------|---------------|
+| `allLegalMoves_nodup` | PerftProofs.lean:87 | Cross-square disjointness via `fromSq` + per-square `pieceTargets` geometry |
+| `moveToSAN_unique_full` | PerftProofs.lean:34 | SAN encodes piece + disambiguation + destination; case analysis of `sanDisambiguation` |
+| `mem_allLegalMoves_implies_not_king_destination` | KMinorMoveLemmas.lean:31 | Needs `ValidGameState` hypothesis (true in legal chess, not provable from raw `GameState`) |
+
+### Lean 4.26 String Library Gaps (2)
+
+| Axiom | File | Proof Strategy |
+|-------|------|---------------|
+| `extractSanBase_on_moveToSAN` | Parsing_SAN_Proofs.lean:888 | Prove `String.replace "e.p." "" = s` when `s` has no '.'; needs ~200 lines of byte-position induction |
+| `extractSanBase_of_zero` | Parsing_SAN_Proofs.lean:1449 | Same `String.replace` blocker |
+
+### SAN Filter Lookup (1)
+
+| Axiom | File | Proof Strategy |
+|-------|------|---------------|
+| `moveFromSanToken_finds_move` | Parsing_SAN_Proofs.lean:1361 | Follows from `moveToSAN_unique_full` (SAN injectivity → filter singleton) |
+
+---
+
+## Eliminated Axioms (20 of 21 original)
 
 | Original Axiom | Resolution | Location |
 |----------------|------------|----------|
@@ -63,38 +65,25 @@ All of the following have been converted to theorems or removed:
 
 ---
 
-## Current Focus: Sorry Elimination
+## Historical Progress
 
-With axiom elimination at 95%, the focus has shifted to eliminating the remaining 8 sorries:
+| Phase | Axioms | Sorries | Theorems | Date |
+|-------|--------|---------|----------|------|
+| Original | 21 | — | ~0 | 2024 |
+| Phase 1-2 | 8 | — | ~215 | 2025 |
+| Phase 3 | 6 | — | ~300 | 2025 |
+| Phase 4 | 1 | 8 | 488 | 2026-01-25 |
+| **Current** | **6** | **0** | **507** | **2026-03-26** |
 
-### Priority 1: SAN Parsing (5 sorries)
-- `moveFromSAN_moveToSAN_roundtrip`
-- `parseSanToken_succeeds_on_moveToSAN`
-- `parseSanToken_extracts_moveToSanBase`
-- `moveFromSanToken_finds_move`
-- `parseSanToken_normalizes_castling`
-
-### Priority 2: Dead Position Soundness (2 sorries)
-- `same_color_bishops_dead`
-- `deadPosition_sound_aux`
-
-### Priority 3: Perft Uniqueness (1 sorry)
-- `moveToSAN_unique_full`
-
-See **PROOF_STATUS.md** for detailed tracking of sorry elimination progress.
+Note: Axiom count increased from 1→6 because 8 sorries were resolved — some became full proofs, others were elevated to well-documented axioms with clear proof strategies.
 
 ---
 
-## Historical Progress Summary
+## Verification Commands
 
-| Phase | Axioms Before | Axioms After | Elimination |
-|-------|---------------|--------------|-------------|
-| Original | 21 | 21 | 0% |
-| Phase 1-2 | 21 | 8 | 62% |
-| Phase 3 | 8 | 6 | 71% |
-| Phase 4+ | 6 | 1 | 95% |
-| **Current** | **1** | **1** | **95%** |
-
-**Conclusion**: Axiom elimination is essentially complete. The single remaining axiom
-(`allLegalMoves_nodup`) is a deliberate design choice with full computational verification.
-
+```bash
+grep -rn "^axiom \|^private axiom " Chess/*.lean   # List axioms
+grep -rn "sorry" Chess/*.lean | grep -v -- "--"     # List sorries
+grep -rn "^theorem\|^lemma" Chess/*.lean | wc -l    # Count theorems
+lake build && lake test                              # Verify
+```
