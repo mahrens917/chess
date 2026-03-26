@@ -3,6 +3,7 @@ import Chess.Movement
 import Chess.Game
 import Chess.Rules
 import Chess.Parsing
+import Chess.SanUniquenessFullProof
 -- import Chess.ParsingProofs  -- Currently has build errors
 
 namespace Chess
@@ -22,20 +23,21 @@ def MoveEquiv (m1 m2 : Move) : Prop :=
   m1.castleRookTo = m2.castleRookTo ∧
   m1.isEnPassant = m2.isEnPassant
 
-/-- SAN uniqueness is an axiom requiring extensive case analysis on the SAN format.
-    The full proof would proceed by:
+/-- SAN uniqueness theorem: equal moveToSAN implies MoveEquiv.
+    Proved by case analysis on the SAN format:
     1. Castles vs non-castles: "O-O"/"O-O-O" start with 'O', standard moves don't
-    2. Same castle type → same piece/from/to/rook positions (determined by position)
-    3. Pawn vs piece: pawn SAN has no uppercase piece letter prefix
-    4. Same piece type: disambiguation (file, rank, or both) ensures unique source square
-    5. Same source + destination → same capture flag (determined by board)
-    6. Promotion suffix determines promotion piece
-    All 100+ PGN test games verify this computationally. -/
-axiom moveToSAN_unique_full : ∀ (gs : GameState) (m1 m2 : Move),
+    2. Same castle type → same piece/from/to/rook positions (via castleMoveIfLegal)
+    3. Non-castle: string structure determines piece type, target, source, promotion, etc.
+    Proof delegates to Chess.SanUniquenessFullProof.moveToSAN_unique_full_thm. -/
+theorem moveToSAN_unique_full : ∀ (gs : GameState) (m1 m2 : Move),
   m1 ∈ Rules.allLegalMoves gs →
   m2 ∈ Rules.allLegalMoves gs →
   moveToSAN gs m1 = moveToSAN gs m2 →
-  MoveEquiv m1 m2
+  MoveEquiv m1 m2 := by
+  intro gs m1 m2 h1 h2 hsan
+  have := SanUniquenessFullProof.moveToSAN_unique_full_thm gs m1 m2 h1 h2 hsan
+  exact ⟨this.1, this.2.1, this.2.2.1, this.2.2.2.1, this.2.2.2.2.1, this.2.2.2.2.2.1,
+         this.2.2.2.2.2.2.1, this.2.2.2.2.2.2.2.1, this.2.2.2.2.2.2.2.2⟩
 end Parsing
 
 namespace Rules
