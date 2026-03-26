@@ -1172,6 +1172,503 @@ theorem String.replace_ep_dot_eq_self (s : String) (h : ∀ c, c ∈ s.toList �
   rw [splitOn_ep_dot_eq_singleton s h]
   unfold String.intercalate; rfl
 
+/-! ## Section 14: String.trim preserves non-whitespace characters -/
+
+
+/-- Reverse induction principle for lists: induct by peeling from the right. -/
+private theorem reverseRec {α : Type _} {motive : List α → Prop}
+    (nil : motive [])
+    (snoc : ∀ (l : List α) (a : α), motive l → motive (l ++ [a])) :
+    ∀ l : List α, motive l := by
+  suffices h : ∀ (r : List α), motive r.reverse by
+    intro l; have := h l.reverse; rwa [List.reverse_reverse] at this
+  intro r; induction r with
+  | nil => exact nil
+  | cons a as ih => rw [List.reverse_cons]; exact snoc as.reverse a ih
+
+/-- The head of dropWhile does not satisfy p. -/
+private theorem head_dropWhile_false (p : Char → Bool) (l : List Char)
+    (a : Char) (rest : List Char) (h : l.dropWhile p = a :: rest) :
+    p a = false := by
+  induction l with
+  | nil => simp [List.dropWhile] at h
+  | cons b bs ih =>
+    rw [List.dropWhile_cons] at h
+    split at h
+    · exact ih h
+    · rename_i hpb
+      have := (List.cons.inj h).1; subst this
+      simp at hpb; exact hpb
+
+/-- utf8GetAux returns the character at the accumulated byte position. -/
+private theorem utf8GetAux_at_utf8Len (pref : List Char) (c : Char) (suf : List Char)
+    (startPos : String.Pos.Raw) :
+    String.Pos.Raw.utf8GetAux (pref ++ c :: suf) startPos
+      ⟨startPos.byteIdx + utf8Len pref⟩ = c := by
+  induction pref generalizing startPos with
+  | nil => simp [utf8Len]; unfold String.Pos.Raw.utf8GetAux; rw [if_pos rfl]
+  | cons d ds ih =>
+    simp only [List.cons_append, utf8Len]; unfold String.Pos.Raw.utf8GetAux
+    have hne : startPos ≠ ⟨startPos.byteIdx + (d.utf8Size + utf8Len ds)⟩ := by
+      intro h; have h2 := congrArg String.Pos.Raw.byteIdx h
+      simp at h2; have := Char.utf8Size_pos d; omega
+    rw [if_neg hne,
+      show (⟨startPos.byteIdx + (d.utf8Size + utf8Len ds)⟩ : String.Pos.Raw) =
+        ⟨(startPos + d).byteIdx + utf8Len ds⟩ from
+        String.Pos.Raw.ext (by simp [String.Pos.Raw.byteIdx_add_char]; omega)]
+    exact ih (startPos + d)
+
+/-- get at byte position utf8Len(pref) returns the character after pref. -/
+private theorem get_at_utf8Len' (s : String) (pref : List Char) (c : Char) (suf : List Char)
+    (hs : s.toList = pref ++ c :: suf) :
+    String.Pos.Raw.get s ⟨utf8Len pref⟩ = c := by
+  simp only [String.Pos.Raw.get, hs]
+  rw [show (⟨utf8Len pref⟩ : String.Pos.Raw) =
+    ⟨(0 : String.Pos.Raw).byteIdx + utf8Len pref⟩ from by simp]
+  exact utf8GetAux_at_utf8Len pref c suf 0
+
+/-- next at byte position utf8Len(pref) advances by c.utf8Size. -/
+private theorem next_at_utf8Len' (s : String) (pref : List Char) (c : Char) (suf : List Char)
+    (hs : s.toList = pref ++ c :: suf) :
+    String.Pos.Raw.next s ⟨utf8Len pref⟩ = ⟨utf8Len pref + c.utf8Size⟩ := by
+  simp only [String.Pos.Raw.next, get_at_utf8Len' s pref c suf hs]
+  apply String.Pos.Raw.ext; simp [String.Pos.Raw.byteIdx_add_char]
+
+/-- utf8PrevAux steps back one character from position utf8Len(l) + c.utf8Size. -/
+private theorem utf8PrevAux_back_one' (l : List Char) (c : Char) (extra : List Char)
+    (startPos : String.Pos.Raw) :
+    String.Pos.Raw.utf8PrevAux (l ++ c :: extra) startPos
+      ⟨startPos.byteIdx + utf8Len l + c.utf8Size⟩ =
+    ⟨startPos.byteIdx + utf8Len l⟩ := by
+  induction l generalizing startPos with
+  | nil =>
+    simp [utf8Len]; unfold String.Pos.Raw.utf8PrevAux
+    rw [if_pos (by simp [String.Pos.Raw.le_iff, String.Pos.Raw.byteIdx_add_char])]
+  | cons d ds ih =>
+    simp only [List.cons_append, utf8Len]; unfold String.Pos.Raw.utf8PrevAux
+    have h_not_le :
+        ¬ (⟨startPos.byteIdx + (d.utf8Size + utf8Len ds) + c.utf8Size⟩ : String.Pos.Raw) ≤
+        (startPos + d) := by
+      simp only [String.Pos.Raw.le_iff, String.Pos.Raw.byteIdx_add_char]
+      have := Char.utf8Size_pos c; omega
+    rw [if_neg h_not_le,
+      show (⟨startPos.byteIdx + (d.utf8Size + utf8Len ds) + c.utf8Size⟩ : String.Pos.Raw) =
+        ⟨(startPos + d).byteIdx + utf8Len ds + c.utf8Size⟩ from
+        String.Pos.Raw.ext (by simp [String.Pos.Raw.byteIdx_add_char]; omega),
+      show (⟨startPos.byteIdx + (d.utf8Size + utf8Len ds)⟩ : String.Pos.Raw) =
+        ⟨(startPos + d).byteIdx + utf8Len ds⟩ from
+        String.Pos.Raw.ext (by simp [String.Pos.Raw.byteIdx_add_char]; omega)]
+    exact ih (startPos + d)
+
+/-- prev steps back one character from the end of pref ++ [c]. -/
+private theorem prev_back_one' (s : String) (pref : List Char) (c : Char) (suf : List Char)
+    (hs : s.toList = pref ++ c :: suf) :
+    String.Pos.Raw.prev s ⟨utf8Len pref + c.utf8Size⟩ = ⟨utf8Len pref⟩ := by
+  show String.Pos.Raw.utf8PrevAux s.toList 0 ⟨utf8Len pref + c.utf8Size⟩ = ⟨utf8Len pref⟩
+  rw [hs,
+    show utf8Len pref + c.utf8Size =
+      (0 : String.Pos.Raw).byteIdx + utf8Len pref + c.utf8Size from by simp]
+  rw [utf8PrevAux_back_one' pref c suf 0]; simp
+
+/-- takeWhileAux scans from utf8Len(pref) and returns utf8Len(pref ++ takeWhile p rest). -/
+private theorem takeWhileAux_eq_takeWhile (s : String) (p : Char → Bool)
+    (pref rest : List Char) (hs : s.toList = pref ++ rest) :
+    Substring.Raw.takeWhileAux s s.rawEndPos p ⟨utf8Len pref⟩ =
+    ⟨utf8Len (pref ++ rest.takeWhile p)⟩ := by
+  induction rest generalizing pref with
+  | nil =>
+    simp only [List.takeWhile, List.append_nil]
+    rw [Substring.Raw.takeWhileAux.eq_1]
+    have h_not_lt : ¬ ((⟨utf8Len pref⟩ : String.Pos.Raw) < s.rawEndPos) := by
+      simp only [String.Pos.Raw.lt_iff, String.rawEndPos]
+      rw [← utf8Len_eq_utf8ByteSize s, hs, List.append_nil]
+      exact Nat.lt_irrefl _
+    rw [dif_neg h_not_lt]
+  | cons c cs ih =>
+    rw [Substring.Raw.takeWhileAux.eq_1]
+    have h_lt : (⟨utf8Len pref⟩ : String.Pos.Raw) < s.rawEndPos := by
+      simp [String.Pos.Raw.lt_iff, String.rawEndPos]
+      rw [← utf8Len_eq_utf8ByteSize s, hs, utf8Len_append, utf8Len]
+      have := Char.utf8Size_pos c; omega
+    rw [dif_pos h_lt, get_at_utf8Len' s pref c cs hs, List.takeWhile_cons]
+    cases hpc : p c with
+    | false => simp
+    | true =>
+      simp
+      rw [next_at_utf8Len' s pref c cs hs]
+      have hpref' : s.toList = (pref ++ [c]) ++ cs := by rw [hs]; simp
+      have hlen : utf8Len pref + c.utf8Size = utf8Len (pref ++ [c]) := by
+        rw [utf8Len_append, utf8Len]; simp [utf8Len]
+      rw [hlen, ih (pref ++ [c]) hpref']
+      congr 1; simp [List.append_assoc]
+
+/-- takeRightWhileAux strips trailing p-satisfying chars.
+    Given s.toList = prefix_left ++ core ++ ws_suffix ++ extra_tail,
+    scanning from utf8Len(prefix_left ++ core ++ ws_suffix) back to utf8Len(prefix_left)
+    returns utf8Len(prefix_left ++ core). -/
+private theorem takeRightWhileAux_strips (s : String) (p : Char → Bool)
+    (prefix_left core ws_suffix extra_tail : List Char)
+    (hs : s.toList = prefix_left ++ core ++ ws_suffix ++ extra_tail)
+    (h_ws : ∀ x, x ∈ ws_suffix → p x = true)
+    (h_core : core = [] ∨
+      ∃ init last_c, core = init ++ [last_c] ∧ p last_c = false) :
+    Substring.Raw.takeRightWhileAux s ⟨utf8Len prefix_left⟩ p
+      ⟨utf8Len (prefix_left ++ core ++ ws_suffix)⟩ =
+    ⟨utf8Len (prefix_left ++ core)⟩ := by
+  induction ws_suffix using reverseRec generalizing core extra_tail with
+  | nil =>
+    simp only [List.append_nil]
+    cases h_core with
+    | inl h_empty =>
+      subst h_empty; simp only [List.append_nil]
+      rw [Substring.Raw.takeRightWhileAux.eq_def]
+      rw [dif_neg (by simp [String.Pos.Raw.lt_iff])]
+    | inr h_ex =>
+      obtain ⟨init, last_c, h_split, h_last⟩ := h_ex
+      rw [Substring.Raw.takeRightWhileAux.eq_def]
+      have h_lt : (⟨utf8Len prefix_left⟩ : String.Pos.Raw) <
+          ⟨utf8Len (prefix_left ++ core)⟩ := by
+        simp [String.Pos.Raw.lt_iff, utf8Len_append]
+        rw [h_split, utf8Len_append, utf8Len]
+        have := Char.utf8Size_pos last_c; omega
+      rw [dif_pos h_lt]
+      have hs' : s.toList = (prefix_left ++ init) ++ last_c :: extra_tail := by
+        rw [hs]; simp [h_split]
+      show (let i' := String.Pos.Raw.prev s ⟨utf8Len (prefix_left ++ core)⟩;
+            let c := String.Pos.Raw.get s i';
+            if (! p c) = true then ⟨utf8Len (prefix_left ++ core)⟩
+            else Substring.Raw.takeRightWhileAux s ⟨utf8Len prefix_left⟩ p i') =
+           ⟨utf8Len (prefix_left ++ core)⟩
+      have h_endPos : (⟨utf8Len (prefix_left ++ core)⟩ : String.Pos.Raw) =
+          ⟨utf8Len (prefix_left ++ init) + last_c.utf8Size⟩ := by
+        apply String.Pos.Raw.ext; rw [h_split]
+        rw [show prefix_left ++ (init ++ [last_c]) =
+          (prefix_left ++ init) ++ [last_c] from by simp]
+        rw [utf8Len_append, utf8Len]; simp [utf8Len]
+      have h_prev : String.Pos.Raw.prev s ⟨utf8Len (prefix_left ++ core)⟩ =
+          ⟨utf8Len (prefix_left ++ init)⟩ := by
+        rw [h_endPos]
+        exact prev_back_one' s (prefix_left ++ init) last_c extra_tail hs'
+      have h_get : String.Pos.Raw.get s ⟨utf8Len (prefix_left ++ init)⟩ = last_c :=
+        get_at_utf8Len' s (prefix_left ++ init) last_c extra_tail hs'
+      simp only [h_prev, h_get,
+        show (! p last_c) = true from by rw [h_last]; simp, ite_true]
+  | snoc ws w ih =>
+    have hw : p w = true := h_ws w (by simp)
+    have hs_split : s.toList =
+        (prefix_left ++ core ++ ws) ++ w :: extra_tail := by rw [hs]; simp
+    have h_endPos_eq : utf8Len (prefix_left ++ core ++ (ws ++ [w])) =
+        utf8Len (prefix_left ++ core ++ ws) + w.utf8Size := by
+      rw [show prefix_left ++ core ++ (ws ++ [w]) =
+        (prefix_left ++ core ++ ws) ++ [w] from by simp]
+      rw [utf8Len_append, utf8Len]; simp [utf8Len]
+    rw [Substring.Raw.takeRightWhileAux.eq_def]
+    have h_lt : (⟨utf8Len prefix_left⟩ : String.Pos.Raw) <
+        ⟨utf8Len (prefix_left ++ core ++ (ws ++ [w]))⟩ := by
+      simp [String.Pos.Raw.lt_iff, utf8Len_append, utf8Len]
+      have := Char.utf8Size_pos w; omega
+    rw [dif_pos h_lt]
+    have h_prev :
+        String.Pos.Raw.prev s ⟨utf8Len (prefix_left ++ core ++ (ws ++ [w]))⟩ =
+        ⟨utf8Len (prefix_left ++ core ++ ws)⟩ := by
+      rw [h_endPos_eq]
+      exact prev_back_one' s (prefix_left ++ core ++ ws) w extra_tail hs_split
+    have h_get :
+        String.Pos.Raw.get s ⟨utf8Len (prefix_left ++ core ++ ws)⟩ = w :=
+      get_at_utf8Len' s (prefix_left ++ core ++ ws) w extra_tail hs_split
+    show (let i' :=
+            String.Pos.Raw.prev s ⟨utf8Len (prefix_left ++ core ++ (ws ++ [w]))⟩;
+          let c := String.Pos.Raw.get s i';
+          if (! p c) = true then ⟨utf8Len (prefix_left ++ core ++ (ws ++ [w]))⟩
+          else Substring.Raw.takeRightWhileAux s ⟨utf8Len prefix_left⟩ p i') =
+         ⟨utf8Len (prefix_left ++ core)⟩
+    simp only [h_prev, h_get, show (! p w) = false from by rw [hw]; simp]
+    exact ih core (w :: extra_tail)
+      (by rw [hs]; simp) (fun x hx => h_ws x (by simp [hx])) h_core
+
+/-- go₂ extracts the middle portion of a list. -/
+private theorem extract_go₂_middle' (mid extra : List Char) (startPos : Nat) :
+    String.Pos.Raw.extract.go₂ (mid ++ extra) ⟨startPos⟩
+      ⟨startPos + utf8Len mid⟩ = mid := by
+  induction mid generalizing startPos extra with
+  | nil =>
+    simp [utf8Len]
+    cases extra with
+    | nil => rfl
+    | cons c cs => unfold String.Pos.Raw.extract.go₂; simp
+  | cons c cs ih =>
+    simp only [utf8Len, List.cons_append]
+    unfold String.Pos.Raw.extract.go₂
+    have hne : (⟨startPos⟩ : String.Pos.Raw) ≠
+        ⟨startPos + (c.utf8Size + utf8Len cs)⟩ := by
+      simp [String.Pos.Raw.mk.injEq]
+      have := Char.utf8Size_pos c; omega
+    rw [if_neg hne]
+    congr 1
+    rw [show (⟨startPos + (c.utf8Size + utf8Len cs)⟩ : String.Pos.Raw) =
+        ⟨startPos + c.utf8Size + utf8Len cs⟩ from
+        String.Pos.Raw.ext (by show startPos + (c.utf8Size + utf8Len cs) =
+          startPos + c.utf8Size + utf8Len cs; omega),
+      show (⟨startPos⟩ : String.Pos.Raw) + c = ⟨startPos + c.utf8Size⟩ from
+        String.Pos.Raw.ext (by simp [String.Pos.Raw.byteIdx_add_char])]
+    exact ih extra (startPos + c.utf8Size)
+
+/-- go₁ skips through a prefix to reach the start of extraction. -/
+private theorem extract_go₁_skip' (pref rest : List Char) (endPos : String.Pos.Raw) :
+    String.Pos.Raw.extract.go₁ (pref ++ rest) 0 ⟨utf8Len pref⟩ endPos =
+    String.Pos.Raw.extract.go₂ rest ⟨utf8Len pref⟩ endPos := by
+  suffices h : ∀ (acc : Nat),
+      String.Pos.Raw.extract.go₁ (pref ++ rest) ⟨acc⟩ ⟨acc + utf8Len pref⟩ endPos =
+      String.Pos.Raw.extract.go₂ rest ⟨acc + utf8Len pref⟩ endPos by
+    have h0 := h 0; simp at h0; exact h0
+  induction pref generalizing rest endPos with
+  | nil =>
+    intro acc; simp [utf8Len]
+    cases rest with
+    | nil => rfl
+    | cons c cs => unfold String.Pos.Raw.extract.go₁; simp
+  | cons p ps ih =>
+    intro acc
+    simp only [List.cons_append, utf8Len]
+    unfold String.Pos.Raw.extract.go₁
+    have hne : (⟨acc⟩ : String.Pos.Raw) ≠
+        ⟨acc + (p.utf8Size + utf8Len ps)⟩ := by
+      simp [String.Pos.Raw.mk.injEq]
+      have := Char.utf8Size_pos p; omega
+    rw [if_neg hne,
+      show (⟨acc⟩ : String.Pos.Raw) + p = ⟨acc + p.utf8Size⟩ from
+        String.Pos.Raw.ext (by simp [String.Pos.Raw.byteIdx_add_char]),
+      show (⟨acc + (p.utf8Size + utf8Len ps)⟩ : String.Pos.Raw) =
+        ⟨acc + p.utf8Size + utf8Len ps⟩ from
+        String.Pos.Raw.ext (by show acc + (p.utf8Size + utf8Len ps) =
+          acc + p.utf8Size + utf8Len ps; omega)]
+    exact ih rest endPos (acc + p.utf8Size)
+
+/-- Extract between byte positions utf8Len(prefix_left) and
+    utf8Len(prefix_left ++ core) gives String.ofList core. -/
+private theorem extract_middle' (s : String) (prefix_left core extra : List Char)
+    (hs : s.toList = prefix_left ++ core ++ extra) :
+    String.Pos.Raw.extract s ⟨utf8Len prefix_left⟩
+      ⟨utf8Len (prefix_left ++ core)⟩ =
+    String.ofList core := by
+  show (if (⟨utf8Len prefix_left⟩ : String.Pos.Raw).byteIdx ≥
+      (⟨utf8Len (prefix_left ++ core)⟩ : String.Pos.Raw).byteIdx then ""
+    else String.ofList (String.Pos.Raw.extract.go₁ s.toList 0
+      ⟨utf8Len prefix_left⟩ ⟨utf8Len (prefix_left ++ core)⟩)) =
+    String.ofList core
+  rw [utf8Len_append]
+  by_cases h_core_zero : utf8Len core = 0
+  · have h_core_empty : core = [] := by
+      cases core with
+      | nil => rfl
+      | cons c cs =>
+        simp [utf8Len] at h_core_zero
+        have := Char.utf8Size_pos c; omega
+    subst h_core_empty; simp [utf8Len]
+  · have h_not_ge :
+        ¬ (utf8Len prefix_left ≥ utf8Len prefix_left + utf8Len core) := by omega
+    rw [show (⟨utf8Len prefix_left⟩ : String.Pos.Raw).byteIdx =
+      utf8Len prefix_left from rfl,
+      show (⟨utf8Len prefix_left + utf8Len core⟩ : String.Pos.Raw).byteIdx =
+      utf8Len prefix_left + utf8Len core from rfl]
+    rw [if_neg h_not_ge, hs,
+      show prefix_left ++ core ++ extra = prefix_left ++ (core ++ extra) from by simp]
+    rw [extract_go₁_skip' prefix_left (core ++ extra)
+      ⟨utf8Len prefix_left + utf8Len core⟩]
+    rw [extract_go₂_middle' core extra (utf8Len prefix_left)]
+
+/-- Membership in dropWhile: if p x = false and x ∈ l, then x ∈ l.dropWhile p. -/
+private theorem mem_dropWhile_of_not_pred (p : Char → Bool) (l : List Char) (x : Char)
+    (hp : p x = false) (hmem : x ∈ l) : x ∈ l.dropWhile p := by
+  induction l with
+  | nil => exact hmem
+  | cons a as ih =>
+    rw [List.dropWhile_cons]
+    split
+    · rename_i ha
+      simp at hmem
+      rcases hmem with rfl | hmem
+      · rw [hp] at ha; exact absurd ha (by simp)
+      · exact ih hmem
+    · exact hmem
+
+/-- All elements of takeWhile satisfy the predicate. -/
+private theorem takeWhile_forall (p : Char → Bool) (l : List Char) :
+    ∀ x, x ∈ l.takeWhile p → p x = true := by
+  induction l with
+  | nil => simp [List.takeWhile]
+  | cons a as ih =>
+    intro x hx
+    rw [List.takeWhile_cons] at hx
+    split at hx
+    · simp at hx; rcases hx with rfl | hx
+      · assumption
+      · exact ih x hx
+    · simp at hx
+
+/-- The core after trimming is empty or ends with a non-p character.
+    Here core_rev = (l.dropWhile p).reverse.dropWhile p, and we show
+    core_rev.reverse has the required property. -/
+private theorem trim_core_property (p : Char → Bool) (l : List Char) :
+    let core_rev := (l.dropWhile p).reverse.dropWhile p
+    core_rev.reverse = [] ∨
+      ∃ init last_c, core_rev.reverse = init ++ [last_c] ∧ p last_c = false := by
+  intro core_rev
+  by_cases h_empty : core_rev = []
+  · left; simp [h_empty]
+  · right
+    obtain ⟨first_rev, rest_rev, h_rev⟩ := List.exists_cons_of_ne_nil h_empty
+    have h_pf : p first_rev = false :=
+      head_dropWhile_false p (l.dropWhile p).reverse first_rev rest_rev h_rev
+    exact ⟨rest_rev.reverse, first_rev,
+      by show core_rev.reverse = rest_rev.reverse ++ [first_rev]
+         rw [h_rev, List.reverse_cons],
+      h_pf⟩
+
+/-- Core list-level decomposition for trim:
+    Any list can be split as leading ++ core ++ trailing where
+    - all leading chars satisfy p
+    - all trailing chars satisfy p
+    - core is empty or ends with a non-p character -/
+private theorem trim_list_decomp (p : Char → Bool) (l : List Char) :
+    ∃ (leading core trailing : List Char),
+      l = leading ++ core ++ trailing ∧
+      (∀ x, x ∈ leading → p x = true) ∧
+      (∀ x, x ∈ trailing → p x = true) ∧
+      (core = [] ∨ ∃ init last_c, core = init ++ [last_c] ∧ p last_c = false) := by
+  let leading := l.takeWhile p
+  let remaining := l.dropWhile p
+  let trailing := (remaining.reverse.takeWhile p).reverse
+  let core := (remaining.reverse.dropWhile p).reverse
+  refine ⟨leading, core, trailing, ?_, ?_, ?_, ?_⟩
+  · have h1 : l = leading ++ remaining := List.takeWhile_append_dropWhile.symm
+    have h2 : remaining = core ++ trailing := by
+      show remaining =
+        (remaining.reverse.dropWhile p).reverse ++ (remaining.reverse.takeWhile p).reverse
+      rw [← List.reverse_append, List.takeWhile_append_dropWhile, List.reverse_reverse]
+    rw [h1, h2]; simp [List.append_assoc]
+  · exact takeWhile_forall p l
+  · intro x hx
+    rw [List.mem_reverse] at hx
+    exact takeWhile_forall p remaining.reverse x hx
+  · exact trim_core_property p l
+
+/-- The main theorem: if c is not whitespace and c is in s, then c is in s.trim. -/
+theorem String.trim_preserves_non_ws_char (s : String) (c : Char)
+    (hc : c.isWhitespace = false) (hmem : c ∈ s.toList) : c ∈ s.trim.toList := by
+  -- Use trim_list_decomp to get the three-part decomposition
+  -- leading = s.toList.takeWhile isWS
+  -- core = ...
+  -- trailing = ...
+  -- We work without let bindings to avoid definitional transparency issues.
+  -- First, get membership in the core via list-level reasoning:
+  -- s.toList = leading ++ core ++ trailing, all leading/trailing are WS, so c ∈ core.
+  -- Then show s.trim.toList = core via byte-level bridge.
+  --
+  -- The approach: prove c ∈ (s.toList.dropWhile Char.isWhitespace) first,
+  -- then c ∈ reverse(dropWhile isWS (reverse (dropWhile isWS s.toList)))
+  -- which equals s.trim.toList.
+  --
+  -- Actually, let's use a simpler approach: just show the membership directly
+  -- using dropWhile properties.
+  --
+  -- Key list fact: c ∈ l ∧ p c = false → c ∈ l.dropWhile p
+  have h1 : c ∈ s.toList.dropWhile Char.isWhitespace :=
+    mem_dropWhile_of_not_pred Char.isWhitespace s.toList c hc hmem
+  -- c ∈ remaining → c ∈ remaining.reverse
+  have h2 : c ∈ (s.toList.dropWhile Char.isWhitespace).reverse :=
+    List.mem_reverse.mpr h1
+  -- c ∈ remaining.reverse → c ∈ remaining.reverse.dropWhile isWS
+  have h3 : c ∈ (s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace :=
+    mem_dropWhile_of_not_pred Char.isWhitespace _ c hc h2
+  -- c ∈ dropWhile(reverse(dropWhile L)) → c ∈ reverse(dropWhile(reverse(dropWhile L)))
+  have h4 : c ∈ ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse :=
+    List.mem_reverse.mpr h3
+  -- Now we need: s.trim.toList = reverse(dropWhile isWS (reverse(dropWhile isWS s.toList)))
+  -- This is the list characterization of trim.
+  -- To prove this, we use the byte-level bridge.
+  suffices h_trim_toList : s.trim.toList =
+      ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse by
+    rw [h_trim_toList]; exact h4
+  -- Prove the list characterization of s.trim
+  -- Define the decomposition pieces
+  -- Decomposition helper for any list
+  have rev_split : ∀ (l : List Char),
+      l = (l.reverse.dropWhile Char.isWhitespace).reverse ++
+          (l.reverse.takeWhile Char.isWhitespace).reverse := by
+    intro l
+    have h := (List.takeWhile_append_dropWhile
+      (p := Char.isWhitespace) (l := l.reverse)).symm
+    have h2 : l.reverse.reverse = (l.reverse.takeWhile Char.isWhitespace ++
+      l.reverse.dropWhile Char.isWhitespace).reverse := by congr 1
+    rw [List.reverse_reverse, List.reverse_append] at h2
+    exact h2
+  -- s.toList = leading ++ core ++ trailing
+  have h_full : s.toList =
+      s.toList.takeWhile Char.isWhitespace ++
+      ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse ++
+      ((s.toList.dropWhile Char.isWhitespace).reverse.takeWhile Char.isWhitespace).reverse := by
+    have h1 : s.toList = s.toList.takeWhile Char.isWhitespace ++
+        s.toList.dropWhile Char.isWhitespace :=
+      (List.takeWhile_append_dropWhile).symm
+    have h2 := rev_split (s.toList.dropWhile Char.isWhitespace)
+    exact Eq.trans (Eq.trans h1 (congrArg
+      (s.toList.takeWhile Char.isWhitespace ++ ·) h2))
+      (List.append_assoc _ _ _).symm
+  have h_trailing_ws : ∀ x,
+      x ∈ ((s.toList.dropWhile Char.isWhitespace).reverse.takeWhile Char.isWhitespace).reverse →
+      Char.isWhitespace x = true := by
+    intro x hx; rw [List.mem_reverse] at hx
+    exact takeWhile_forall Char.isWhitespace (s.toList.dropWhile Char.isWhitespace).reverse x hx
+  have h_core_prop := trim_core_property Char.isWhitespace s.toList
+  -- Byte-level: takeWhileAux
+  have h_left : Substring.Raw.takeWhileAux s s.rawEndPos Char.isWhitespace 0 =
+      ⟨utf8Len (s.toList.takeWhile Char.isWhitespace)⟩ := by
+    have := takeWhileAux_eq_takeWhile s Char.isWhitespace [] s.toList (by simp)
+    simp [utf8Len] at this; exact this
+  -- Byte-level: takeRightWhileAux
+  have h_right : Substring.Raw.takeRightWhileAux s
+      ⟨utf8Len (s.toList.takeWhile Char.isWhitespace)⟩ Char.isWhitespace s.rawEndPos =
+      ⟨utf8Len (s.toList.takeWhile Char.isWhitespace ++
+        ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse)⟩ := by
+    rw [show s.rawEndPos =
+      ⟨utf8Len (s.toList.takeWhile Char.isWhitespace ++
+        ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse ++
+        ((s.toList.dropWhile Char.isWhitespace).reverse.takeWhile Char.isWhitespace).reverse)⟩ from
+      String.Pos.Raw.ext (by
+        show s.utf8ByteSize = _
+        rw [← utf8Len_eq_utf8ByteSize s]; congr 1)]
+    exact takeRightWhileAux_strips s Char.isWhitespace
+      (s.toList.takeWhile Char.isWhitespace)
+      (((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse)
+      (((s.toList.dropWhile Char.isWhitespace).reverse.takeWhile Char.isWhitespace).reverse)
+      []
+      (by rw [← h_full]; simp) h_trailing_ws h_core_prop
+  -- Byte-level: extract
+  have h_extract : String.Pos.Raw.extract s
+      ⟨utf8Len (s.toList.takeWhile Char.isWhitespace)⟩
+      ⟨utf8Len (s.toList.takeWhile Char.isWhitespace ++
+        ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse)⟩ =
+      String.ofList ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse :=
+    extract_middle' s
+      (s.toList.takeWhile Char.isWhitespace)
+      (((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse)
+      (((s.toList.dropWhile Char.isWhitespace).reverse.takeWhile Char.isWhitespace).reverse)
+      (by rw [← h_full])
+  -- Combine: s.trim = String.ofList core_list
+  have h_trim_eq : s.trim = String.ofList
+      ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse := by
+    show (Substring.Raw.trim ⟨s, 0, s.rawEndPos⟩).toString = _
+    show String.Pos.Raw.extract s
+      (Substring.Raw.takeWhileAux s s.rawEndPos Char.isWhitespace 0)
+      (Substring.Raw.takeRightWhileAux s
+        (Substring.Raw.takeWhileAux s s.rawEndPos Char.isWhitespace 0)
+        Char.isWhitespace s.rawEndPos) = _
+    rw [h_left, h_right, h_extract]
+  rw [h_trim_eq, String.toList_ofList]
+
+
+
 end StringLemmas
 
 end Chess
