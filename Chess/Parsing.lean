@@ -120,7 +120,7 @@ def parsePlacement (placement : String) : Except String (List (Square × Piece))
     []
 
 def parseActiveColor (s : String) : Except String Color :=
-  match s.trim with
+  match s.trimAscii.toString with
   | "w" => return Color.White
   | "b" => return Color.Black
   | _ => throw s!"Invalid active color in FEN: {s}"
@@ -135,7 +135,7 @@ def parseCastlingRights (s : String) : CastlingRights :=
       blackQueenSide := s.contains 'q' }
 
 def parseEnPassant (s : String) : Except String (Option Square) :=
-  let trimmed := s.trim
+  let trimmed := s.trimAscii.toString
   if trimmed = "-" then
     return none
   else
@@ -144,7 +144,7 @@ def parseEnPassant (s : String) : Except String (Option Square) :=
     | none => throw s!"Invalid en passant square {s}"
 
 def parseNatField (s : String) (label : String) : Except String Nat :=
-  match s.trim.toNat? with
+  match s.trimAscii.toString.toNat? with
   | some n => return n
   | none => throw s!"Invalid number for {label}: {s}"
 
@@ -241,7 +241,7 @@ def validateFEN (board : Board) (toMove : Color) (cr : CastlingRights) (ep : Opt
   | none => pure ()
 
 def parseFEN (fen : String) : Except String GameState := do
-  match fen.trim.splitOn " " with
+  match fen.trimAscii.toString.splitOn " " with
   | [placement, active, castling, ep, half, full] =>
       let pieces ← parsePlacement placement
       let board := Board.fromList pieces
@@ -377,9 +377,9 @@ def peelAnnotations : List Char → List Char → List Char × List Char
 /-- Extract the SAN base fields from a token (pure computation without normalization) -/
 def extractSanBase (token : String) :
     Except String (String × Option SanCheckHint × List String) :=
-  let trimmed := token.trim.replace "e.p." ""
+  let trimmed := token.trimAscii.toString.replace "e.p." ""
   -- Also remove "ep" suffix if it appears after a move (e.g., exd6ep)
-  let trimmed := if trimmed.endsWith "ep" then trimmed.dropRight 2 else trimmed
+  let trimmed := if trimmed.endsWith "ep" then trimmed.dropEnd 2 |>.toString else trimmed
   if trimmed.isEmpty then
     .error "SAN token cannot be empty"
   else
@@ -493,10 +493,10 @@ def parseTags (pgn : String) : List (String × String) :=
     | [] => []
     | line :: rest =>
         if line.startsWith "[" && line.contains '\"' then
-          let noOpen := line.drop 1
+          let noOpen := (line.drop 1).toString
           match noOpen.splitOn "\"" with
           | name :: val :: _ =>
-              (name.trim, val) :: loop rest
+              (name.trimAscii.toString, val) :: loop rest
           | _ => loop rest
         else
           loop rest
@@ -505,7 +505,7 @@ def parseTags (pgn : String) : List (String × String) :=
 def tokensFromPGN (pgn : String) : Except String (List String) :=
   let withoutTags :=
     pgn.splitOn "\n"
-      |>.filter (fun line => ¬ line.trim.startsWith "[")
+      |>.filter (fun line => ¬ line.trimAscii.toString.startsWith "[")
       |> String.intercalate "\n"
   do
     let cleaned ← stripPGNNoise withoutTags
@@ -526,7 +526,7 @@ def collectSanWithNags (tokens : List String) : Except String (List SanToken) :=
     | [] => pure acc.reverse
     | t :: ts =>
         if t.startsWith "$" then
-          let nag := t.drop 1
+          let nag := (t.drop 1).toString
           match acc with
           | [] => throw "NAG appears before any move"
           | entry :: rest =>
@@ -587,7 +587,7 @@ def extractTagValue (pgn : String) (tag : String) : Option String :=
     | [] => none
     | line :: rest =>
         if line.startsWith s!"[{tag} " then
-          let parts := line.drop (tag.length + 2) -- drop '[' and tag plus space
+          let parts := (line.drop (tag.length + 2)).toString -- drop '[' and tag plus space
           match parts.splitOn "\"" with
           | _ :: val :: _ => some val
           | _ => loop rest

@@ -418,9 +418,9 @@ def runDemoExportTests : IO Unit := do
         pgn := some pgnPath }
     exportOutputs targets state none
     let fenContents ← IO.FS.readFile fenPath
-    expectStr "FEN export matches state" fenContents.trim (Parsing.toFEN state)
+    expectStr "FEN export matches state" fenContents.trimAscii.toString (Parsing.toFEN state)
     let sanContents ← IO.FS.readFile sanPath
-    let sanLines := sanContents.trim.splitOn "\n"
+    let sanLines := sanContents.trimAscii.toString.splitOn "\n"
     let expectedSans := legalSans state
     expectNat "SAN export line count" sanLines.length expectedSans.length
     expectBool "SAN export matches list" (sanLines == expectedSans) true

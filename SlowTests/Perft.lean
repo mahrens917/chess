@@ -1,4 +1,4 @@
-import Test.Runner
+import ChessTest.Runner
 
 open Chess
 open Chess.Rules
