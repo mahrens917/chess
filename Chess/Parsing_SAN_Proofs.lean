@@ -1,6 +1,7 @@
 import Chess.Parsing
 import Chess.Rules
 import Chess.StringLemmas
+import Lean
 
 namespace Chess
 namespace Parsing
@@ -903,6 +904,110 @@ private theorem normalize_castle_OO :
     normalizeCastleToken "O-O" = "O-O" := by native_decide
 private theorem normalize_castle_OOO :
     normalizeCastleToken "O-O-O" = "O-O-O" := by native_decide
+
+-- ============================================================================
+-- INFRASTRUCTURE FOR NON-CASTLE endsWith "ep" PROOF
+-- ============================================================================
+
+end Parsing
+end Chess
+
+-- Meta-programming tactic to unfold the private substrEq loop.
+open Lean Meta Elab Tactic in
+elab "unfold_substrEq_loop" : tactic => do
+  let goal ← getMainGoal
+  let target ← goal.getType
+  let n : Name := .str (.str (.str (.str (.str (.num (.str (.str (.str (.str (.str .anonymous "_private") "Init") "Data") "String") "Basic") 0) "String") "Pos") "Raw") "substrEq") "loop"
+  let result ← Meta.unfold target n
+  match result.proof? with
+  | some proof => let goal' ← goal.replaceTargetEq result.expr proof; replaceMainGoal [goal']
+  | none => let goal' ← goal.change result.expr; replaceMainGoal [goal']
+
+namespace Chess
+namespace Parsing
+
+/-- utf8GetAux returns an element of the list or the default character. -/
+private theorem utf8GetAux_mem_or_default' :
+    ∀ (l : List Char) (i p : String.Pos.Raw),
+    String.Pos.Raw.utf8GetAux l i p ∈ l ∨ String.Pos.Raw.utf8GetAux l i p = default := by
+  intro l; induction l with
+  | nil => intro i p; right; unfold String.Pos.Raw.utf8GetAux; rfl
+  | cons c cs ih =>
+    intro i p; unfold String.Pos.Raw.utf8GetAux; split
+    · left; exact List.Mem.head cs
+    · cases ih (i + c) p with
+      | inl hmem => left; exact List.Mem.tail c hmem
+      | inr hdef => right; exact hdef
+
+/-- String.get returns an element of toList or the default character. -/
+private theorem get_mem_or_default' (s : String) (i : String.Pos.Raw) :
+    String.Pos.Raw.get s i ∈ s.toList ∨ String.Pos.Raw.get s i = default := by
+  unfold String.Pos.Raw.get; exact utf8GetAux_mem_or_default' s.toList 0 i
+
+/-- Extract the rightmost Bool from a && chain. -/
+private theorem and_right' {a b : Bool} (h : (a && b) = true) : b = true := by
+  cases a <;> simp_all
+
+-- If no character in s is 'p', then s.endsWith "ep" = false.
+-- Proved by contradiction: endsWith true -> substrEq loop compares 'p' ->
+-- 'p' in s.toList -> contradiction with hypothesis. Uses unfold_substrEq_loop
+-- to access the private loop definition for character-by-character analysis.
+set_option maxHeartbeats 64000000 in
+private theorem endsWith_ep_false_of_no_p (s : String)
+    (h : ∀ c ∈ s.toList, c ≠ 'p') : s.endsWith "ep" = false := by
+  apply Bool.eq_false_iff.mpr; intro hends
+  -- Extract substrEq = true from endsWith = true
+  unfold String.endsWith at hends; simp only [BEq.beq] at hends
+  unfold Substring.Raw.beq at hends; dsimp only [] at hends
+  have h_str : (s.toRawSubstring.takeRight "ep".length).repair.str = s := by
+    unfold String.toRawSubstring; unfold Substring.Raw.takeRight; unfold Substring.Raw.repair; simp
+  have h_ep_str : "ep".toRawSubstring.repair.str = "ep" := by native_decide
+  have h_ep_start : "ep".toRawSubstring.repair.startPos = ⟨0⟩ := by native_decide
+  have h_ep_bsize : "ep".toRawSubstring.repair.bsize = 2 := by native_decide
+  have h_bsize_eq : (s.toRawSubstring.takeRight "ep".length).repair.bsize = 2 := by
+    have := (Bool.and_eq_true_iff.mp hends).1; rw [h_ep_bsize] at this
+    simp [BEq.beq, decide_eq_true_eq] at this; exact this
+  rw [h_str, h_ep_str, h_ep_start, h_bsize_eq, h_ep_bsize] at hends
+  have h_sub := and_right' hends
+  -- Extract loop = true
+  unfold String.Pos.Raw.substrEq at h_sub
+  have h_loop := and_right' h_sub
+  -- Prove loop = false → contradiction
+  revert h_loop; rw [imp_false, Bool.not_eq_true]
+  -- Unfold loop iteration 1
+  unfold_substrEq_loop
+  simp only [show (s.toRawSubstring.takeRight "ep".length).repair.startPos.byteIdx <
+    (s.toRawSubstring.takeRight "ep".length).repair.startPos.byteIdx + 2 from by omega, dite_true]
+  rw [Bool.and_eq_false_iff]
+  by_cases h_first : (String.Pos.Raw.get s (s.toRawSubstring.takeRight "ep".length).repair.startPos ==
+    String.Pos.Raw.get "ep" ⟨0⟩) = true
+  · right
+    have h_get_e : String.Pos.Raw.get s (s.toRawSubstring.takeRight "ep".length).repair.startPos = 'e' := by
+      have : String.Pos.Raw.get "ep" ⟨0⟩ = 'e' := by native_decide
+      rw [this] at h_first; simp [BEq.beq, decide_eq_true_eq] at h_first; exact h_first
+    -- Unfold loop iteration 2
+    unfold_substrEq_loop
+    have h_lt2 : ((s.toRawSubstring.takeRight "ep".length).repair.startPos +
+        String.Pos.Raw.get s (s.toRawSubstring.takeRight "ep".length).repair.startPos).byteIdx <
+        (s.toRawSubstring.takeRight "ep".length).repair.startPos.byteIdx + 2 := by
+      simp only [String.Pos.Raw.add_char_eq, h_get_e,
+        show Char.utf8Size 'e' = 1 from by native_decide]; omega
+    simp only [h_lt2, dite_true]
+    rw [Bool.and_eq_false_iff]; left
+    -- The second char of "ep" is 'p': show the comparison fails
+    apply Bool.eq_false_iff.mpr; intro h_beq
+    have h_eq : String.Pos.Raw.get s ((s.toRawSubstring.takeRight "ep".length).repair.startPos +
+        String.Pos.Raw.get s (s.toRawSubstring.takeRight "ep".length).repair.startPos) =
+        String.Pos.Raw.get "ep" ((⟨0⟩ : String.Pos.Raw) +
+        String.Pos.Raw.get "ep" (⟨0⟩ : String.Pos.Raw)) := by
+      simp [BEq.beq, decide_eq_true_eq] at h_beq; exact h_beq
+    have h_rhs_p : String.Pos.Raw.get "ep" ((⟨0⟩ : String.Pos.Raw) +
+        String.Pos.Raw.get "ep" (⟨0⟩ : String.Pos.Raw)) = 'p' := by native_decide
+    rw [h_rhs_p] at h_eq
+    cases get_mem_or_default' s _ with
+    | inl hmem => exact h 'p' (h_eq ▸ hmem) rfl
+    | inr hdef => exact absurd (h_eq ▸ hdef) (by decide : ('p' : Char) ≠ default)
+  · left; exact Bool.eq_false_iff.mpr (fun h' => h_first h')
 
 /-- extractSanBase succeeds on moveToSAN output and returns the SAN base.
     Castle case proved by native_decide on all 6 concrete strings.
