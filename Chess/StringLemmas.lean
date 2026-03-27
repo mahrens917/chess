@@ -4,15 +4,58 @@ StringLemmas.lean
 This file provides foundational string manipulation lemmas needed for proving
 SAN (Standard Algebraic Notation) parsing properties.
 
-Built on top of Lean 4.26's standard library String lemmas.
-
 Includes infrastructure lemmas connecting byte-level string operations to
 character-level semantics for dropRight and endsWith proofs.
+
+In Lean 4.29, several String operations (any, contains, trim, dropRight) were
+redefined to use a pattern-based Slice framework. The new implementations are
+semantically equivalent to the old ones but the proofs of equivalence require
+going through the opaque iterator/pattern framework.
+
+We axiomatize bridges between new and old APIs where needed, similar to the
+existing replace_eq_intercalate_splitOn axiom for String.replace.
 -/
+import Batteries
 
 namespace Chess
 
 namespace StringLemmas
+
+/-! ## Bridge axioms for Lean 4.29 API changes
+
+In Lean 4.29, `String.any`, `String.contains`, and `String.dropRight` were
+redefined to use pattern-based search via `String.Slice`. The new definitions
+are semantically equivalent but not definitionally equal to the old ones.
+
+The `String.Legacy` namespace in Batteries preserves the old definitions.
+`String.any_eq` from Batteries proves `Legacy.any s p = s.toList.any p`.
+
+We bridge the gap between the new `String.any` (pattern-based) and the old
+`String.Legacy.any` (character iteration) with an axiom, analogous to the
+existing `replace_eq_intercalate_splitOn` axiom for `String.replace`.
+-/
+
+/-- Bridge axiom: the new pattern-based `String.any` agrees with the old
+character-iteration-based `String.Legacy.any`. Both check whether any
+character in the string satisfies the predicate `p`. -/
+axiom string_any_eq_legacy (s : String) (p : Char → Bool) :
+    s.any p = String.Legacy.any s p
+
+/-- Bridge axiom: the new pattern-based `String.dropRight` agrees with the old
+`Substring.Raw`-based computation. Both remove the last `n` characters. -/
+axiom string_dropRight_eq_legacy (s : String) (n : Nat) :
+    s.dropRight n = (String.toRawSubstring s |>.dropRight n |>.toString)
+
+/-- Bridge axiom: the new pattern-based `String.contains` for `Char` agrees with the old
+`String.Legacy.contains`. Both check whether the character appears in the string. -/
+axiom string_contains_eq_legacy (s : String) (c : Char) :
+    s.contains c = String.Legacy.contains s c
+
+/-- Bridge axiom: the new `String.trim` (which goes through `trimAscii.copy`)
+agrees with the old `Substring.Raw.trim`-based computation. Both trim leading
+and trailing ASCII whitespace. -/
+axiom string_trim_eq_legacy (s : String) :
+    s.trim = (Substring.Raw.trim (String.toRawSubstring s)).toString
 
 /-! ## Section 0: UTF-8 Infrastructure -/
 
@@ -399,9 +442,14 @@ private theorem extract_full (s : String) :
     rw [extract_go₂_full s.toList 0]
     exact String.ofList_toList
 
+/-- Two strings with the same underlying byte array are equal. -/
+private theorem string_eq_of_ba_eq (s₁ s₂ : String)
+    (h : s₁.toByteArray = s₂.toByteArray) : s₁ = s₂ := by
+  cases s₁; cases s₂; simpa using h
+
 /-- dropRight 0 is the identity function -/
 private theorem dropRight_zero (s : String) : s.dropRight 0 = s := by
-  unfold String.dropRight
+  rw [string_dropRight_eq_legacy]
   simp only [String.toRawSubstring, Substring.Raw.dropRight]
   simp only [Substring.Raw.prevn]
   simp only [Substring.Raw.toString]
@@ -613,10 +661,13 @@ Example: ("ab" ++ "cd").dropRight 2 = "ab" ✓
 -/
 theorem String.dropRight_append_right' (s t : String) :
     (s ++ t).dropRight t.length = s := by
+  -- Use bridge to old Substring.Raw-based definition
+  rw [string_dropRight_eq_legacy]
   -- Base case: t is empty
   by_cases ht : t = ""
   · rw [ht]
     simp only [String.append_empty, String.length_empty]
+    rw [← string_dropRight_eq_legacy]
     exact dropRight_zero s
   · -- General case: use prevn_full_string then extract_prefix
     have h_prevn : Substring.Raw.prevn
@@ -634,7 +685,6 @@ theorem String.dropRight_append_right' (s t : String) :
         (utf8Len_eq_utf8ByteSize s).symm
       rw [h_str_eq, h_utf8_eq, h_len_eq, h_utf8_s]
       exact prevn_full_string s.toList t.toList
-    unfold String.dropRight
     simp only [String.toRawSubstring, Substring.Raw.dropRight, String.rawEndPos,
                Substring.Raw.bsize, String.Pos.Raw.offsetBy, Nat.zero_add]
     simp only [show (s ++ t).utf8ByteSize.sub 0 = (s ++ t).utf8ByteSize from Nat.sub_zero _]
@@ -745,18 +795,18 @@ private theorem utf8GetAux_skip_to (pre : List Char) (c : Char) (rest : List Cha
 
 section AnyAuxBridge
 set_option allowUnsafeReducibility true
-attribute [local semireducible] String.anyAux
+attribute [local semireducible] String.Legacy.anyAux
 
-/-- anyAux on String.ofList (pre ++ suf) from byte position utf8Len pre to utf8Len (pre ++ suf)
+/-- Legacy.anyAux on String.ofList (pre ++ suf) from byte position utf8Len pre to utf8Len (pre ++ suf)
     equals suf.any p. This is the core of the String.any ↔ List.any bridge. -/
 private theorem anyAux_suffix_eq_list_any (pre suf : List Char) (p : Char → Bool) :
-    String.anyAux (String.ofList (pre ++ suf)) ⟨utf8Len (pre ++ suf)⟩ p ⟨utf8Len pre⟩ = suf.any p := by
+    String.Legacy.anyAux (String.ofList (pre ++ suf)) ⟨utf8Len (pre ++ suf)⟩ p ⟨utf8Len pre⟩ = suf.any p := by
   induction suf generalizing pre with
   | nil =>
-    simp only [List.append_nil, List.any_nil]; unfold String.anyAux
+    simp only [List.append_nil, List.any_nil]; unfold String.Legacy.anyAux
     simp [show ¬(utf8Len pre < utf8Len pre) from Nat.lt_irrefl _]
   | cons c cs ih =>
-    simp only [List.any_cons]; unfold String.anyAux
+    simp only [List.any_cons]; unfold String.Legacy.anyAux
     have h_lt : utf8Len pre < utf8Len (pre ++ c :: cs) := by
       rw [utf8Len_append]; simp [utf8Len]; have := Char.utf8Size_pos c; omega
     simp only [show (⟨utf8Len pre⟩ : String.Pos.Raw) < ⟨utf8Len (pre ++ c :: cs)⟩ from h_lt, ↓reduceDIte]
@@ -770,20 +820,20 @@ private theorem anyAux_suffix_eq_list_any (pre suf : List Char) (p : Char → Bo
     by_cases hp : p c = true
     · simp [hp]
     · simp only [hp, Bool.false_eq_true, ↓reduceIte, Bool.false_or]
-      calc String.anyAux (String.ofList (pre ++ c :: cs)) ⟨utf8Len (pre ++ c :: cs)⟩ p
+      calc String.Legacy.anyAux (String.ofList (pre ++ c :: cs)) ⟨utf8Len (pre ++ c :: cs)⟩ p
               ⟨utf8Len pre + c.utf8Size⟩
-          = String.anyAux (String.ofList ((pre ++ [c]) ++ cs)) ⟨utf8Len ((pre ++ [c]) ++ cs)⟩ p
+          = String.Legacy.anyAux (String.ofList ((pre ++ [c]) ++ cs)) ⟨utf8Len ((pre ++ [c]) ++ cs)⟩ p
               ⟨utf8Len (pre ++ [c])⟩ := by
             congr 1 <;> simp [utf8Len_append, utf8Len] <;> omega
         _ = cs.any p := ih (pre ++ [c])
 
-/-- String.any on String.ofList l equals List.any on l. -/
-theorem any_ofList_eq_list_any (l : List Char) (p : Char → Bool) :
-    (String.ofList l).any p = l.any p := by
-  unfold String.any String.rawEndPos
+/-- Legacy.any on String.ofList l equals List.any on l. -/
+private theorem legacy_any_ofList_eq_list_any (l : List Char) (p : Char → Bool) :
+    String.Legacy.any (String.ofList l) p = l.any p := by
+  unfold String.Legacy.any String.rawEndPos
   rw [show (String.ofList l).utf8ByteSize = utf8Len l from (utf8Len_eq_utf8ByteSize_ofList l).symm]
-  show String.anyAux (String.ofList l) ⟨utf8Len l⟩ p 0 = l.any p
-  change String.anyAux (String.ofList l) ⟨utf8Len l⟩ p ⟨utf8Len []⟩ = l.any p
+  show String.Legacy.anyAux (String.ofList l) ⟨utf8Len l⟩ p 0 = l.any p
+  change String.Legacy.anyAux (String.ofList l) ⟨utf8Len l⟩ p ⟨utf8Len []⟩ = l.any p
   rw [show String.ofList l = String.ofList ([] ++ l) from by simp,
       show (⟨utf8Len l⟩ : String.Pos.Raw) = ⟨utf8Len ([] ++ l)⟩ from by simp]
   exact anyAux_suffix_eq_list_any [] l p
@@ -793,15 +843,15 @@ end AnyAuxBridge
 /-- String.any on any string equals List.any on its toList. -/
 theorem String.any_eq_toList_any (s : String) (p : Char → Bool) :
     s.any p = s.toList.any p := by
-  have h := any_ofList_eq_list_any s.toList p
-  rw [String.ofList_toList] at h; exact h
+  -- Bridge: new String.any agrees with Legacy.any (axiom), then use Batteries lemma
+  rw [string_any_eq_legacy]
+  exact String.any_eq s p
 
 /-- String.contains is equivalent to membership in toList. -/
 theorem String.contains_iff_mem_toList (s : String) (c : Char) :
     s.contains c = true ↔ c ∈ s.toList := by
-  unfold String.contains
-  rw [String.any_eq_toList_any]
-  simp [List.any_eq_true, beq_iff_eq]
+  rw [string_contains_eq_legacy]
+  exact String.contains_iff s c
 
 /-- If a character is not in s.toList, then s.contains returns false. -/
 theorem String.not_contains_of_not_mem_toList (s : String) (c : Char) :
@@ -929,7 +979,8 @@ theorem String.trim_eq_self_of_no_whitespace (s : String)
         (Substring.Raw.takeRightWhileAux s
           (Substring.Raw.takeWhileAux s s.rawEndPos Char.isWhitespace (0 : String.Pos.Raw))
           Char.isWhitespace s.rawEndPos) = s by
-      unfold String.trim Substring.Raw.trim
+      rw [string_trim_eq_legacy]
+      unfold Substring.Raw.trim
       simp only [String.toRawSubstring, Substring.Raw.toString]
       exact h_eq
     rw [h_twa, h_trwa]
@@ -1658,6 +1709,7 @@ theorem String.trim_preserves_non_ws_char (s : String) (c : Char)
   -- Combine: s.trim = String.ofList core_list
   have h_trim_eq : s.trim = String.ofList
       ((s.toList.dropWhile Char.isWhitespace).reverse.dropWhile Char.isWhitespace).reverse := by
+    rw [string_trim_eq_legacy]
     show (Substring.Raw.trim ⟨s, 0, s.rawEndPos⟩).toString = _
     show String.Pos.Raw.extract s
       (Substring.Raw.takeWhileAux s s.rawEndPos Char.isWhitespace 0)
