@@ -1,168 +1,147 @@
 # Axiom Elimination Plan
 
-**Goal:** Reduce 16 axioms to 0.
-**Approach:** 4 parallel workstreams, ordered by tractability.
+**Current state:** 16 axioms, 0 sorries, 930 theorems (Lean 4.29 + Mathlib)
 
 ---
 
-## Workstream A: Lean 4.29 API Bridges (3 axioms)
-
-**Files:** Parsing_SAN_Proofs.lean
-**Effort:** Low — these likely have existing proofs in Mathlib/Batteries
-**Dependencies:** None
-**Can run in parallel with:** Everything
-
-### Axioms
-1. `String.front_eq_head` — `s.front = s.toList.head`
-2. `String.back_eq_getLast` — `s.back = s.toList.getLast`
-3. `String.all_ofList` — `(String.ofList l).all p = l.all p`
-
-### Strategy
-Search Mathlib and Batteries for existing proofs:
-```bash
-grep -rn "front.*head\|front.*toList" .lake/packages/batteries/
-grep -rn "back.*getLast\|back.*toList" .lake/packages/batteries/
-grep -rn "all_ofList\|all.*toList" .lake/packages/batteries/
-```
-
-If not found, prove via `unfold String.front/back` + `utf8GetAux` reasoning (similar infrastructure already exists in StringLemmas.lean Section 14).
-
----
-
-## Workstream B: Lean 4.29 Stdlib Bridges (5 axioms)
+## Category 1: Lean 4.29 String API Bridges — BLOCKED upstream (5 axioms)
 
 **Files:** StringLemmas.lean
-**Effort:** Medium — need to show new API = old API
-**Dependencies:** None
-**Can run in parallel with:** Everything
+**Status:** Unprovable in Lean 4.29. Requires upstream Lean/Batteries changes.
+
+In Lean 4.29 the `String` type was rewritten from `{ data : List Char }` to a
+validated UTF-8 `ByteArray`. All core String operations (`any`, `contains`,
+`dropRight`, `trim`, `replace`) now use `String.Slice` + `String.Internal.*`
+which are **opaque** — no specification theorems connect them to `List Char`.
+The old implementations were preserved in `String.Legacy` (Batteries) but no
+bridge lemmas exist.
+
+Every approach was tried: `rfl`, `decide`, `native_decide`, `unfold`/`delta`,
+`exact?`/`apply?`/`rw?`, and the `solve` MCP server. All fail because the
+kernel cannot reduce the new opaque operations.
 
 ### Axioms
-4. `string_any_eq_legacy` — new `String.any` = `String.Legacy.any`
-5. `string_contains_eq_legacy` — new `String.contains` = `String.Legacy.contains`
-6. `string_dropRight_eq_legacy` — new `String.dropRight` = old implementation
-7. `string_trim_eq_legacy` — new `String.trim` = old `Substring.Raw.trim`
-8. `String.replace_eq_intercalate_splitOn` — `replace` = `intercalate ∘ splitOn`
 
-### Strategy
-For 4-7: The new functions go through `String.Slice`/`Std.Iterators`. Two approaches:
-- **Approach 1:** Check if `String.Legacy.*` functions have `@[simp]` lemmas connecting them to the new API in Batteries
-- **Approach 2:** Prove by showing both functions compute the same result on `String.toList` — unfold both to their byte-level implementations and show they traverse the same characters
+| # | Name | File:Line | Statement |
+|---|------|-----------|-----------|
+| 1 | `string_any_eq_legacy` | StringLemmas.lean:41 | `s.any p = String.Legacy.any s p` |
+| 2 | `string_contains_eq_legacy` | StringLemmas.lean:51 | `s.contains c = String.Legacy.contains s c` |
+| 3 | `string_dropRight_eq_legacy` | StringLemmas.lean:46 | `s.dropRight n = (toRawSubstring s \|>.dropRight n \|>.toString)` |
+| 4 | `string_trim_eq_legacy` | StringLemmas.lean:57 | `s.trim = (Substring.Raw.trim (toRawSubstring s)).toString` |
+| 5 | `String.replace_eq_intercalate_splitOn` | StringLemmas.lean:1017 | `s.replace pat rep = String.intercalate rep (s.splitOn pat)` |
 
-For 8: `String.replace` uses KMP-based `ForwardSliceSearcher`. Prove by:
-- Showing `splitOn` and `replace` use the same pattern-matching algorithm
-- Or proving via `String.splitOn` characterization + `intercalate` reassembly
-
-### Key insight
-`String.Legacy.any` IS the old `String.any` — it was preserved in Batteries when the new API was introduced. If Batteries has `@[deprecated_alias]` or `theorem String.any_eq_legacy`, use that directly.
+### Unblock path
+Upstream Lean or Batteries must provide:
+1. Correctness theorem for `Std.Iter.any`/`Std.Iter.all` in terms of `Iter.toList`
+2. Specification theorems for `String.Internal.any`, `.contains`, `.front`, `.back`, `.trim`
+3. Bridge between `String.extract` (byte-level) and `String.Pos.Raw.extract` (list-level)
 
 ---
 
-## Workstream C: SAN Character Properties (6 axioms)
+## Category 2: String-to-List Bridges — BLOCKED on Category 1 (3 axioms)
 
 **Files:** Parsing_SAN_Proofs.lean
-**Effort:** Medium-High — systematic but repetitive case analysis
-**Dependencies:** Workstreams A & B help but aren't strictly required
-**Can run in parallel with:** A, B, D
+**Status:** Provable once Category 1 is resolved. Each reduces to a Category 1 axiom + a Batteries `String.Legacy.*` lemma.
 
-### Axioms
-9. `parseSanToken_succeeds_non_castle` — extractSanBase succeeds on non-castle moveToSAN
-10. `parseSanToken_extracts_non_castle` — extractSanBase recovers moveToSanBase
-11. `extractSanBase_ne_error` — extractSanBase succeeds when token has '0'
-12. `replace_ep_dot_preserves_zero` — '0' survives `String.replace "e.p." ""`
-13. `dropEnd_ep_preserves_zero` — '0' survives `String.dropEnd 2`
-14. `moveFromSanToken_finds_move` — SAN filter produces matching move
+| # | Name | File:Line | Statement |
+|---|------|-----------|-----------|
+| 6 | `String.front_eq_head` | Parsing_SAN_Proofs.lean:16 | `s.front = s.toList.head hlist` |
+| 7 | `String.back_eq_getLast` | Parsing_SAN_Proofs.lean:20 | `s.back = s.toList.getLast _` |
+| 8 | `String.all_ofList` | Parsing_SAN_Proofs.lean:26 | `(String.ofList l).all p = l.all p` |
 
-### Strategy
-
-**Phase C1: Character lemmas (12, 13)**
-Prove '0' survives `replace` and `dropEnd`:
-- For 12: Use `replace_eq_intercalate_splitOn` (axiom 8). `splitOn "e.p."` splits on the pattern. `intercalate ""` joins the parts. '0' ∉ "e.p.".toList, so '0' stays in one of the parts. Need: `List.mem_join_of_mem` or similar from Mathlib.
-- For 13: `dropEnd 2` removes last 2 chars. When `endsWith "ep"`, the last 2 are 'e','p'. Since '0' ≠ 'e' and '0' ≠ 'p', '0' is in the prefix. Prove via `List.dropLast` reasoning.
-
-**Phase C2: extractSanBase pipeline (11)**
-With 12 and 13 proved, `extractSanBase_ne_error` follows from the already-proved list-level pipeline lemmas (`peelAnnotations_preserves_zero`, `dropWhile_plus_preserves_zero`, etc.).
-
-**Phase C3: moveToSanBase character analysis (9, 10)**
-Prove every character in `moveToSanBase gs m` (non-castle) is from {a-h, 1-8, K,Q,R,B,N,x,=,O,-}:
-- `pieceLetter pt` ∈ {"K","Q","R","B","N",""} — 6 cases by `cases pt`
-- `sanDisambiguation gs m` — chars are `fileChar` (a-h) or `rankChar` (1-8)
-- `algebraic sq` — `fileChar` + `rankChar`
-- `promotionSuffix m` ∈ {"","=Q","=R","=B","=N"} — 5 cases
-- `"x"` — single char
-
-Then show: none of these chars are whitespace, '.', or 'p'. Use `native_decide` for each concrete char.
-
-From these character properties:
-- `String.trim_eq_self_of_no_whitespace` applies → trim is identity
-- `String.replace_ep_dot_eq_self` applies → replace is identity
-- `endsWith_ep_false_of_no_p` applies → no dropEnd
-- Trace through extractSanBase → .ok with correct base
-
-**Phase C4: SAN filter (14)**
-`moveFromSanToken_finds_move` needs: the filter over legal moves matching a SAN token produces at least one result equivalent to `m`. This follows from SAN uniqueness (largely proved in SanUniquenessFullProof.lean). May need the pawn fromSq sub-proofs to be completed first.
+### Proof sketch (verified, compiles with bridge axioms)
+- Prove `string_front_eq_legacy` (new → Legacy), then compose with `String.front_eq` (Legacy → toList) from Batteries.
+- Same pattern for `back` and `all`.
 
 ---
 
-## Workstream D: Chess-Structural (2 axioms)
+## Category 3: SAN Parsing Pipeline — BLOCKED on Categories 1-2 (5 axioms)
 
-**Files:** PerftProofs.lean, KMinorMoveLemmas.lean
-**Effort:** High
-**Dependencies:** None
-**Can run in parallel with:** Everything
+**Files:** Parsing_SAN_Proofs.lean
+**Status:** Blocked by opaque `String.replace`, `String.endsWith`, `String.trim`, `String.dropEnd`.
 
-### Axioms
-15. `allLegalMoves_nodup` — move generation produces no duplicates
-16. `mem_allLegalMoves_implies_not_king_destination` — no legal move captures a king
+| # | Name | File:Line | Statement |
+|---|------|-----------|-----------|
+| 9 | `replace_ep_dot_preserves_zero` | Parsing_SAN_Proofs.lean:36 | `'0' ∈ s.toList → '0' ∈ (s.replace "e.p." "").toList` |
+| 10 | `dropEnd_ep_preserves_zero` | Parsing_SAN_Proofs.lean:44 | `s.endsWith "ep" → '0' ∈ s.toList → '0' ∈ (s.dropEnd 2).toString.toList` |
+| 11 | `extractSanBase_ne_error` | Parsing_SAN_Proofs.lean:1750 | `'0' ∈ token.toList → extractSanBase token ≠ .error e` |
+| 12 | `parseSanToken_succeeds_non_castle` | Parsing_SAN_Proofs.lean:1037 | `extractSanBase` succeeds on non-castle `moveToSAN` output |
+| 13 | `parseSanToken_extracts_non_castle` | Parsing_SAN_Proofs.lean:1085 | `extractSanBase` recovers `moveToSanBase` from non-castle SAN |
 
-### Strategy
+### Dependency chain
+- **9** depends on axiom 5 (`replace_eq_intercalate_splitOn`) + `splitOn`/`intercalate` membership
+- **10** depends on axiom 3 (`dropRight_eq_legacy`) + character reasoning
+- **11** depends on 9 + 10 + already-proved pipeline lemmas
+- **12, 13** depend on axioms 4 (`trim`) + 5 (`replace`) being identity on chess notation chars, plus `endsWith` characterization
 
-**For 15 (`allLegalMoves_nodup`):**
-Previous attempts proved King and Knight cases. Remaining:
-- **Sliding pieces** (Queen/Rook/Bishop): Prove `walk` visits distinct squares per ray direction. Each step increments file/rank by the delta, producing distinct `(file,rank)` pairs. Different rays have different delta directions → different target squares.
-- **Pawns**: Forward moves have distinct ranks (single vs double step → different `toSq`). Captures have distinct files. Promotions differ by `promotion` field.
-- **Precondition**: May need `hasValidKings` (at most one king per color) to avoid duplicate castle moves.
-
-**For 16 (`mem_allLegalMoves_implies_not_king_destination`):**
-This requires proving that in a legal chess position, no legal move can capture a king. The issue: `GameState` doesn't enforce position validity. Two options:
-- **Option A:** Add `ValidGameState` hypothesis (position reachable from start)
-- **Option B:** Prove it from `basicLegalAndSafe` — if the opponent's king could be captured, the opponent was already in check and shouldn't have been allowed to move. This requires showing the previous move was legal, which needs game history.
-
-Recommendation: Option A with a `ValidGameState` predicate.
+### What's already proved
+- Castle cases of `parseSanToken_succeeds_on_moveToSAN` and `parseSanToken_extracts_moveToSanBase` via `native_decide`
+- Character properties: `algebraic_chars_not_whitespace`, `algebraic_chars_not_dot`, `pieceLetter_chars`, `promotionSuffix_chars`
+- Pipeline lemmas: `peelAnnotations_preserves_zero`, `dropWhile_plus_preserves_zero`, `trim_preserves_non_ws_char`
 
 ---
 
-## Execution Order
+## Category 4: Chess-Structural — PROVABLE (2 axioms)
 
-```
-Week 1 (parallel):
-  ├── Workstream A: Search Mathlib/Batteries for front/back/all_ofList [1 day]
-  ├── Workstream B: Investigate Legacy bridges in Batteries [2-3 days]
-  └── Workstream D: allLegalMoves_nodup sliding piece walk [3-5 days]
+**Files:** KMinorMoveLemmas.lean, PerftProofs.lean
+**Status:** Independent of String axioms. Provable with current infrastructure.
 
-Week 2 (parallel):
-  ├── Workstream C Phase C1-C2: '0' preservation lemmas [2 days]
-  ├── Workstream C Phase C3: moveToSanBase char analysis [3-4 days]
-  └── Workstream D: king destination (if Option A chosen) [2 days]
+### Axiom 14: `mem_allLegalMoves_implies_not_king_destination`
 
-Week 3:
-  └── Workstream C Phase C4: moveFromSanToken_finds_move [2-3 days]
-      (depends on C3 completion)
-```
+| # | Name | File:Line | Statement |
+|---|------|-----------|-----------|
+| 14 | `mem_allLegalMoves_implies_not_king_destination` | KMinorMoveLemmas.lean:20 | No legal move targets a king |
+
+**Approach:** Add `KingsPlusMinor` + `inCheck = false` preconditions. Proof uses:
+- `KingsPlusMinor.kingSquare_white/black` to locate kings precisely
+- Minor piece is not a king (`isMinorPiece`)
+- If a king were captured, the attacker would put the opponent in check, contradicting `hNotInCheck`
+- Agent D produced a working proof but it was reverted along with other changes. Can be re-applied.
+
+### Axiom 15: `allLegalMoves_nodup`
+
+| # | Name | File:Line | Statement |
+|---|------|-----------|-----------|
+| 15 | `allLegalMoves_nodup` | PerftProofs.lean:89 | `List.Nodup (allLegalMoves gs)` |
+
+**What's needed:**
+- Cross-square disjointness: moves from different squares have different `fromSq` — follows from `pieceTargets_sets_fromSq` (proved)
+- Per-square uniqueness: each square generates moves with distinct `(toSq, promotion)` pairs
+  - King standard / Knight: `filterMap` injectivity on `allSquares` (which is `Nodup` by `native_decide`)
+  - Sliding pieces (Q/R/B): prove `walk` visits distinct squares per ray; different rays produce disjoint sets
+  - Pawns: forward moves have distinct ranks, captures have distinct files, promotions differ by `promotion` field
+- May need `hasValidKings gs.board` precondition to avoid duplicate castle moves
 
 ---
 
-## Parallel Agent Strategy
+## Category 5: SAN Filter — INDEPENDENT (1 axiom)
 
-Launch these agent groups simultaneously:
+**Files:** Parsing_SAN_Proofs.lean
+**Status:** Requires SAN uniqueness integration with filter/singleton reasoning.
 
-### Group 1: Library Search (Workstreams A + B)
-Search Mathlib/Batteries for existing proofs of the 8 stdlib bridge axioms. Many may already be proved upstream.
+| # | Name | File:Line | Statement |
+|---|------|-----------|-----------|
+| 16 | `moveFromSanToken_finds_move` | Parsing_SAN_Proofs.lean:1587 | SAN filter over legal moves produces a move equivalent to `m` |
 
-### Group 2: Character Analysis (Workstream C, Phases C1-C3)
-Prove moveToSanBase character properties and '0' preservation. This is the largest workstream but highly parallelizable — each component (pieceLetter, algebraic, disambiguation, promotionSuffix) can be analyzed independently.
+### What's needed
+1. `m` is in the candidates list (from `moveToSanBase gs m = token.san`)
+2. `sanDisambiguation` makes SAN strings unique among legal moves with the same piece type and target
+3. `validateCheckHint` succeeds (check/mate hint is consistent)
 
-### Group 3: Move Generation (Workstream D)
-Prove `allLegalMoves_nodup` for sliding pieces and pawns. Independent of all other workstreams.
+SAN uniqueness is largely proved in `SanUniquenessFullProof.lean` but the integration with the filter/singleton argument is not yet done.
 
-### Group 4: Integration (Workstream C, Phase C4)
-After Groups 1-3 complete, assemble the remaining axiom proofs.
+---
+
+## Summary
+
+| Category | Axioms | Status | Blocker |
+|----------|--------|--------|---------|
+| 1. String API bridges | 5 | BLOCKED | Lean 4.29 opaque `String.Internal.*` |
+| 2. String-to-List bridges | 3 | BLOCKED | Category 1 |
+| 3. SAN parsing pipeline | 5 | BLOCKED | Categories 1-2 |
+| 4. Chess-structural | 2 | PROVABLE | Per-square uniqueness, king capture proof |
+| 5. SAN filter | 1 | OPEN | SAN uniqueness integration |
+| **Total** | **16** | | |
+
+**Independently provable now:** Axioms 14-16 (Categories 4-5).
+**Blocked on upstream:** Axioms 1-13 (Categories 1-3). All trace back to Lean 4.29's opaque String internals.
