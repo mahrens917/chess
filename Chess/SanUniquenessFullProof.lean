@@ -1899,6 +1899,327 @@ private theorem rankInt_injective (s1 s2 : Square)
     ({ file := f2, rank := r2 } : Square).rankInt → r1 = r2 := by native_decide
   exact this s1.file s2.file s1.rank s2.rank h
 
+-- squareFromInts is deterministic
+private theorem squareFromInts_det (f r : Int) (s1 s2 : Square)
+    (h1 : Movement.squareFromInts f r = some s1) (h2 : Movement.squareFromInts f r = some s2) :
+    s1 = s2 := by
+  rw [h1] at h2; exact Option.some.inj h2
+
+-- promotionMoves preserves piece
+private theorem promotionMoves_piece (base m : Move)
+    (h : m ∈ Rules.promotionMoves base) : m.piece = base.piece := by
+  unfold Rules.promotionMoves at h
+  split at h
+  · simp only [List.mem_map] at h; obtain ⟨_, _, heq⟩ := h; subst heq; rfl
+  · simp only [List.mem_singleton] at h; subst h; rfl
+
+-- promotionMoves preserves isCapture
+private theorem promotionMoves_isCapture (base m : Move)
+    (h : m ∈ Rules.promotionMoves base) : m.isCapture = base.isCapture := by
+  unfold Rules.promotionMoves at h
+  split at h
+  · simp only [List.mem_map] at h; obtain ⟨_, _, heq⟩ := h; subst heq; rfl
+  · simp only [List.mem_singleton] at h; subst h; rfl
+
+-- walk-generated moves have piece = p (same pattern as walk_castle_none)
+private theorem walk_piece_eq (src : Square) (p : Piece) (board : Board) (color : Color)
+    (maxStep : Nat) (df dr : Int) (step : Nat) (acc : List Move)
+    (hacc : ∀ m ∈ acc, m.piece = p) (m : Move)
+    (hmem : m ∈ Rules.slidingTargets.walk src p board color maxStep df dr step acc) :
+    m.piece = p := by
+  induction step generalizing acc with
+  | zero => simp only [Rules.slidingTargets.walk] at hmem; exact hacc m hmem
+  | succ s ih =>
+    simp only [Rules.slidingTargets.walk] at hmem
+    cases h1 : Movement.squareFromInts (src.fileInt + df * (Int.ofNat (maxStep - s)))
+        (src.rankInt + dr * (Int.ofNat (maxStep - s))) with
+    | none => simp only [h1] at hmem; exact hacc m hmem
+    | some target =>
+      simp only [h1] at hmem
+      by_cases he : Rules.isEmpty board target = true
+      · simp only [he, ↓reduceIte] at hmem
+        apply ih _ _ hmem
+        intro m' hm'
+        rw [List.mem_cons] at hm'
+        rcases hm' with rfl | h'
+        · rfl
+        · exact hacc m' h'
+      · simp only [he, Bool.false_eq_true, ↓reduceIte] at hmem
+        by_cases hc : Rules.isEnemyAt board color target = true
+        · simp only [hc, ↓reduceIte] at hmem
+          rw [List.mem_cons] at hmem
+          rcases hmem with rfl | h'
+          · rfl
+          · exact hacc m h'
+        · simp only [hc, Bool.false_eq_true, ↓reduceIte] at hmem; exact hacc m hmem
+
+-- foldr of walk: piece = p
+private theorem foldr_walk_piece_eq (src : Square) (p : Piece) (board : Board)
+    (color : Color) (maxStep : Nat) (deltas : List (Int × Int)) (m : Move)
+    (hmem : m ∈ deltas.foldr (fun d acc =>
+      Rules.slidingTargets.walk src p board color maxStep d.fst d.snd maxStep acc) []) :
+    m.piece = p := by
+  induction deltas generalizing m with
+  | nil => simp at hmem
+  | cons d rest ih =>
+    simp only [List.foldr_cons] at hmem
+    exact walk_piece_eq src p board color maxStep d.fst d.snd maxStep
+      _ (fun m' hm' => ih m' hm') m hmem
+
+-- filterMap-generated moves have piece = p
+private theorem filterMap_piece_eq (gs : GameState) (sq : Square) (p : Piece)
+    (targets : List Square) (m : Move)
+    (hmem : m ∈ targets.filterMap (fun target =>
+      if Rules.destinationFriendlyFree gs { piece := p, fromSq := sq, toSq := target } then
+        match gs.board target with
+        | some _ => some { piece := p, fromSq := sq, toSq := target, isCapture := true }
+        | none => some { piece := p, fromSq := sq, toSq := target }
+      else none)) :
+    m.piece = p := by
+  obtain ⟨target, _, hfm⟩ := List.mem_filterMap.mp hmem
+  by_cases hdest : Rules.destinationFriendlyFree gs { piece := p, fromSq := sq, toSq := target } = true
+  · simp only [hdest, ↓reduceIte] at hfm
+    split at hfm <;> (injection hfm with h; subst h; rfl)
+  · simp only [hdest, Bool.false_eq_true, ↓reduceIte] at hfm; simp at hfm
+
+-- For any non-castle move in pieceTargets, m.piece.pieceType = p.pieceType
+private theorem pieceTargets_pieceType_eq (gs : GameState) (sq : Square) (p : Piece) (m : Move)
+    (hmem : m ∈ Rules.pieceTargets gs sq p) (hnc : m.isCastle = false) :
+    m.piece.pieceType = p.pieceType := by
+  unfold Rules.pieceTargets at hmem
+  cases hpt : p.pieceType with
+  | Pawn =>
+    simp only [hpt] at hmem
+    rw [List.mem_append] at hmem
+    rcases hmem with hfwd | hcap
+    · have ⟨base, hbase_mem, hprom⟩ := mem_foldr_append Rules.promotionMoves _ m hfwd
+      have hpiece := promotionMoves_piece base m hprom
+      cases h1 : Movement.squareFromInts sq.fileInt (sq.rankInt + Movement.pawnDirection p.color) with
+      | none => simp only [h1] at hbase_mem; simp at hbase_mem
+      | some target =>
+        simp only [h1] at hbase_mem
+        by_cases he : Rules.isEmpty gs.board target = true
+        · simp only [he, ↓reduceIte] at hbase_mem
+          rw [List.mem_append] at hbase_mem
+          rcases hbase_mem with hb | hd
+          · simp only [List.mem_singleton] at hb; subst hb; rw [hpiece]; exact hpt
+          · by_cases hr : sq.rankNat = Rules.pawnStartRank p.color
+            · simp only [hr, ↓reduceIte] at hd
+              cases h2 : Movement.squareFromInts sq.fileInt (sq.rankInt + 2 * Movement.pawnDirection p.color) with
+              | none => simp only [h2] at hd; simp at hd
+              | some t2 =>
+                simp only [h2] at hd
+                by_cases he2 : Rules.isEmpty gs.board t2 = true
+                · simp only [he2, ↓reduceIte, List.mem_singleton] at hd; subst hd; rw [hpiece]; exact hpt
+                · simp only [he2, Bool.false_eq_true, ↓reduceIte, List.not_mem_nil] at hd
+            · simp only [hr, ↓reduceIte, List.not_mem_nil] at hd
+        · simp only [he, Bool.false_eq_true, ↓reduceIte, List.not_mem_nil] at hbase_mem
+    · simp only [List.foldr_cons, List.foldr_nil] at hcap
+      have one_df : ∀ (df : Int) (rest : List Move),
+          (∀ mx, mx ∈ rest → mx.piece.pieceType = p.pieceType) →
+          m ∈ (match Movement.squareFromInts (sq.fileInt + df) (sq.rankInt + Movement.pawnDirection p.color) with
+            | some target =>
+                if Rules.isEnemyAt gs.board p.color target then
+                  Rules.promotionMoves { piece := p, fromSq := sq, toSq := target, isCapture := true } ++ rest
+                else if gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target then
+                  { piece := p, fromSq := sq, toSq := target, isCapture := true, isEnPassant := true } :: rest
+                else rest
+            | none => rest) →
+          m.piece.pieceType = p.pieceType := by
+        intro df rest hrest hmem_df
+        cases hq : Movement.squareFromInts (sq.fileInt + df) (sq.rankInt + Movement.pawnDirection p.color) with
+        | none => simp only [hq] at hmem_df; exact hrest m hmem_df
+        | some target =>
+          simp only [hq] at hmem_df
+          by_cases he : Rules.isEnemyAt gs.board p.color target = true
+          · simp only [he, ↓reduceIte] at hmem_df
+            rw [List.mem_append] at hmem_df
+            rcases hmem_df with hprom | hrest'
+            · rw [(promotionMoves_piece _ m hprom)]
+            · exact hrest m hrest'
+          · simp only [he, Bool.false_eq_true, ↓reduceIte] at hmem_df
+            by_cases hep : gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target
+            · rw [if_pos hep] at hmem_df; rw [List.mem_cons] at hmem_df
+              rcases hmem_df with rfl | hrest'
+              · rfl
+              · exact hrest m hrest'
+            · rw [if_neg hep] at hmem_df; exact hrest m hmem_df
+      exact one_df (-1) _ (fun mx hmx => one_df 1 [] (fun _ hmx' => absurd hmx' (List.not_mem_nil _)) hmx) hcap
+  | King =>
+    simp only [hpt] at hmem
+    rw [List.mem_append] at hmem
+    rcases hmem with hstd | hcastle
+    · rw [(filterMap_piece_eq gs sq p _ m hstd)]; exact hpt
+    · obtain ⟨opt, hopt_mem, hopt_eq⟩ := List.mem_filterMap.mp hcastle
+      simp only [id_eq] at hopt_eq
+      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hopt_mem
+      rcases hopt_mem with rfl | rfl
+      · exact absurd (castleMoveIfLegal_isCastle gs true m hopt_eq) (by rw [hnc]; decide)
+      · exact absurd (castleMoveIfLegal_isCastle gs false m hopt_eq) (by rw [hnc]; decide)
+  | Queen =>
+    simp only [hpt] at hmem; unfold Rules.slidingTargets at hmem
+    rw [(foldr_walk_piece_eq sq p gs.board p.color 7 _ m hmem)]; exact hpt
+  | Rook =>
+    simp only [hpt] at hmem; unfold Rules.slidingTargets at hmem
+    rw [(foldr_walk_piece_eq sq p gs.board p.color 7 _ m hmem)]; exact hpt
+  | Bishop =>
+    simp only [hpt] at hmem; unfold Rules.slidingTargets at hmem
+    rw [(foldr_walk_piece_eq sq p gs.board p.color 7 _ m hmem)]; exact hpt
+  | Knight =>
+    simp only [hpt] at hmem
+    rw [(filterMap_piece_eq gs sq p _ m hmem)]; exact hpt
+
+-- Legal moves come from legalMovesForCached with p.color = gs.toMove
+private theorem legal_piece_color_eq_toMove (gs : GameState) (m : Move)
+    (hmem : m ∈ Rules.allLegalMoves gs) :
+    ∃ sq p, gs.board sq = some p ∧ p.color = gs.toMove ∧ m ∈ Rules.pieceTargets gs sq p := by
+  unfold Rules.allLegalMoves at hmem
+  have ⟨sq, _, hsq⟩ := mem_foldr_append
+    (fun sq => Rules.legalMovesForCached gs sq (Rules.pinnedSquares gs gs.toMove))
+    allSquares m hmem
+  unfold Rules.legalMovesForCached at hsq
+  cases hbd : gs.board sq with
+  | none => simp only [hbd, List.not_mem_nil] at hsq
+  | some p =>
+    simp only [hbd] at hsq
+    by_cases hcolor : p.color ≠ gs.toMove
+    · rw [if_pos hcolor] at hsq; simp at hsq
+    · rw [if_neg hcolor] at hsq
+      simp only [ne_eq, Decidable.not_not] at hcolor
+      have h1 := List.mem_filter.mp hsq
+      have h2 := List.mem_filter.mp h1.1
+      exact ⟨sq, p, hbd, hcolor, h2.1⟩
+
+-- Forward pawn moves: rank is either 1 or 2 steps, with intermediate empty for 2-step
+private theorem pawn_fwd_rank_options (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (hmem : m ∈ (match Movement.squareFromInts src.fileInt (src.rankInt + Movement.pawnDirection p.color) with
+      | some target =>
+          if Rules.isEmpty gs.board target then
+            [{ piece := p, fromSq := src, toSq := target : Move }] ++
+            (if src.rankNat = Rules.pawnStartRank p.color then
+              match Movement.squareFromInts src.fileInt (src.rankInt + 2 * Movement.pawnDirection p.color) with
+              | some target2 =>
+                  if Rules.isEmpty gs.board target2 then
+                    [{ piece := p, fromSq := src, toSq := target2 : Move }]
+                  else []
+              | none => []
+            else [])
+          else []
+      | none => [])) :
+    (m.toSq.rankInt = src.rankInt + Movement.pawnDirection p.color) ∨
+    (m.toSq.rankInt = src.rankInt + 2 * Movement.pawnDirection p.color ∧
+     ∃ mid, Movement.squareFromInts src.fileInt (src.rankInt + Movement.pawnDirection p.color) = some mid ∧
+            Rules.isEmpty gs.board mid = true) := by
+  cases h1 : Movement.squareFromInts src.fileInt (src.rankInt + Movement.pawnDirection p.color) with
+  | none => simp only [h1] at hmem; simp at hmem
+  | some target =>
+    simp only [h1] at hmem
+    have htgt_rank := Movement.squareFromInts_rankInt _ _ target h1
+    by_cases he : Rules.isEmpty gs.board target = true
+    · simp only [he, ↓reduceIte] at hmem
+      rw [List.mem_append] at hmem
+      rcases hmem with hb | hd
+      · simp only [List.mem_singleton] at hb; subst hb; left; exact htgt_rank
+      · by_cases hr : src.rankNat = Rules.pawnStartRank p.color
+        · simp only [hr, ↓reduceIte] at hd
+          cases h2 : Movement.squareFromInts src.fileInt (src.rankInt + 2 * Movement.pawnDirection p.color) with
+          | none => simp only [h2] at hd; simp at hd
+          | some t2 =>
+            simp only [h2] at hd
+            have ht2_rank := Movement.squareFromInts_rankInt _ _ t2 h2
+            by_cases he2 : Rules.isEmpty gs.board t2 = true
+            · simp only [he2, ↓reduceIte, List.mem_singleton] at hd; subst hd
+              right; exact ⟨ht2_rank, ⟨target, rfl, he⟩⟩
+            · simp only [he2, Bool.false_eq_true, ↓reduceIte, List.not_mem_nil] at hd
+        · simp only [hr, ↓reduceIte, List.not_mem_nil] at hd
+    · simp only [he, Bool.false_eq_true, ↓reduceIte, List.not_mem_nil] at hmem
+
+-- foldr of promotionMoves over forward base moves: rank options
+private theorem foldr_promotionMoves_fwd_rank_options (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (hmem : m ∈ (match Movement.squareFromInts src.fileInt (src.rankInt + Movement.pawnDirection p.color) with
+      | some target =>
+          if Rules.isEmpty gs.board target then
+            [{ piece := p, fromSq := src, toSq := target : Move }] ++
+            (if src.rankNat = Rules.pawnStartRank p.color then
+              match Movement.squareFromInts src.fileInt (src.rankInt + 2 * Movement.pawnDirection p.color) with
+              | some target2 =>
+                  if Rules.isEmpty gs.board target2 then
+                    [{ piece := p, fromSq := src, toSq := target2 : Move }]
+                  else []
+              | none => []
+            else [])
+          else []
+      | none => []).foldr (fun mv acc => Rules.promotionMoves mv ++ acc) []) :
+    (m.toSq.rankInt = src.rankInt + Movement.pawnDirection p.color) ∨
+    (m.toSq.rankInt = src.rankInt + 2 * Movement.pawnDirection p.color ∧
+     ∃ mid, Movement.squareFromInts src.fileInt (src.rankInt + Movement.pawnDirection p.color) = some mid ∧
+            Rules.isEmpty gs.board mid = true) := by
+  have ⟨base, hbase_mem, hprom⟩ := mem_foldr_append Rules.promotionMoves _ m hmem
+  rw [(promotionMoves_toSq_file base m hprom)]
+  exact pawn_fwd_rank_options gs src p base hbase_mem
+
+-- Pawn capture moves: isCapture = true
+private theorem pawn_cap_isCapture (gs : GameState) (src : Square) (p : Piece) (m : Move)
+    (hmem : m ∈ ([-1, 1] : List Int).foldr
+        (fun df acc =>
+          match Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection p.color) with
+          | some target =>
+              if Rules.isEnemyAt gs.board p.color target then
+                Rules.promotionMoves { piece := p, fromSq := src, toSq := target, isCapture := true } ++ acc
+              else if gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target then
+                { piece := p, fromSq := src, toSq := target, isCapture := true, isEnPassant := true } :: acc
+              else acc
+          | none => acc)
+        []) :
+    m.isCapture = true := by
+  simp only [List.foldr_cons, List.foldr_nil] at hmem
+  have one_df : ∀ (df : Int) (rest : List Move),
+      (∀ mx, mx ∈ rest → mx.isCapture = true) →
+      m ∈ (match Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection p.color) with
+        | some target =>
+            if Rules.isEnemyAt gs.board p.color target then
+              Rules.promotionMoves { piece := p, fromSq := src, toSq := target, isCapture := true } ++ rest
+            else if gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target then
+              { piece := p, fromSq := src, toSq := target, isCapture := true, isEnPassant := true } :: rest
+            else rest
+        | none => rest) →
+      m.isCapture = true := by
+    intro df rest hrest hmem_df
+    cases hq : Movement.squareFromInts (src.fileInt + df) (src.rankInt + Movement.pawnDirection p.color) with
+    | none => simp only [hq] at hmem_df; exact hrest m hmem_df
+    | some target =>
+      simp only [hq] at hmem_df
+      by_cases he : Rules.isEnemyAt gs.board p.color target = true
+      · simp only [he, ↓reduceIte] at hmem_df
+        rw [List.mem_append] at hmem_df
+        rcases hmem_df with hprom | hrest'
+        · rw [(promotionMoves_isCapture _ m hprom)]
+        · exact hrest m hrest'
+      · simp only [he, Bool.false_eq_true, ↓reduceIte] at hmem_df
+        by_cases hep : gs.enPassantTarget = some target ∧ Rules.isEmpty gs.board target
+        · rw [if_pos hep] at hmem_df; rw [List.mem_cons] at hmem_df
+          rcases hmem_df with rfl | hrest'
+          · rfl
+          · exact hrest m hrest'
+        · rw [if_neg hep] at hmem_df; exact hrest m hmem_df
+  exact one_df (-1) _ (fun mx hmx => one_df 1 [] (fun _ hmx' => absurd hmx' (List.not_mem_nil _)) hmx) hmem
+
+-- Pawn non-capture from pieceTargets: rank options
+private theorem pawn_pieceTargets_nocap_rank_options (gs : GameState) (sq : Square) (p : Piece) (m : Move)
+    (hp : p.pieceType = PieceType.Pawn)
+    (hmem : m ∈ Rules.pieceTargets gs sq p)
+    (hnocap : m.isCapture = false ∧ m.isEnPassant = false) :
+    (m.toSq.rankInt = sq.rankInt + Movement.pawnDirection p.color) ∨
+    (m.toSq.rankInt = sq.rankInt + 2 * Movement.pawnDirection p.color ∧
+     ∃ mid, Movement.squareFromInts sq.fileInt (sq.rankInt + Movement.pawnDirection p.color) = some mid ∧
+            Rules.isEmpty gs.board mid = true) := by
+  unfold Rules.pieceTargets at hmem
+  simp only [hp] at hmem
+  rw [List.mem_append] at hmem
+  rcases hmem with hfwd | hcap_moves
+  · exact foldr_promotionMoves_fwd_rank_options gs sq p m hfwd
+  · exact absurd (pawn_cap_isCapture gs sq p m hcap_moves) (by rw [hnocap.1]; decide)
+
 -- ============================================================================
 -- SECTION 10: MAIN THEOREM
 -- ============================================================================
@@ -1930,70 +2251,85 @@ private theorem non_castle_moveEquiv (gs : GameState) (m1 m2 : Move)
     by_cases hp : m1.piece.pieceType = PieceType.Pawn
     · -- Pawn: fromSq from file char (capture) or from toSq constraint (non-capture)
       have hp2 : m2.piece.pieceType = PieceType.Pawn := hpt.symm ▸ hp
-      -- Get pieceTargets membership for both
-      have ⟨sq1, p1, hbd1, hmem1⟩ := legal_pawn_pieceTargets_mem gs m1 h1
-      have ⟨sq2, p2, hbd2, hmem2⟩ := legal_pawn_pieceTargets_mem gs m2 h2
-      -- m.fromSq = sq (from move construction)
-      -- We need to establish that p1/p2 are pawns
-      -- From legal_move_color and originHasPiece, gs.board m.fromSq = some m.piece
-      -- and pieceTargets generates moves from sq, so m.fromSq = sq
-      -- First, establish that p1.pieceType = PieceType.Pawn
-      -- From the structure of allLegalMoves/legalMovesForCached, the piece p at sq
-      -- is the piece used in pieceTargets, and the generated moves have m.piece = p
-      -- So p1.pieceType = m1.piece.pieceType = Pawn, and similarly p2
-      -- The fromSq = sq follows from pawn_pieceTargets_fromSq_geometry
-      have hfs1 := pawn_pieceTargets_fromSq_geometry gs sq1 p1 m1 hp hmem1
-      have hfs2 := pawn_pieceTargets_fromSq_geometry gs sq2 p2 m2 hp2 hmem2
-      -- Now: m1.fromSq = sq1, m2.fromSq = sq2
+      -- Get pieceTargets membership with board piece color = gs.toMove
+      have ⟨sq1, p1, hbd1, hc1, hmem1⟩ := legal_piece_color_eq_toMove gs m1 h1
+      have ⟨sq2, p2, hbd2, hc2, hmem2⟩ := legal_piece_color_eq_toMove gs m2 h2
+      -- Establish p1, p2 are pawns via pieceTargets_pieceType_eq
+      have hp1_pawn : p1.pieceType = PieceType.Pawn := by
+        have := pieceTargets_pieceType_eq gs sq1 p1 m1 hmem1 hnc1; rw [← this]; exact hp
+      have hp2_pawn : p2.pieceType = PieceType.Pawn := by
+        have := pieceTargets_pieceType_eq gs sq2 p2 m2 hmem2 hnc2; rw [← this]; exact hp2
+      -- m.fromSq = sq from pawn geometry
+      have hfs1 := pawn_pieceTargets_fromSq_geometry gs sq1 p1 m1 hp1_pawn hmem1
+      have hfs2 := pawn_pieceTargets_fromSq_geometry gs sq2 p2 m2 hp2_pawn hmem2
+      -- p1.color = p2.color (both = gs.toMove)
+      have hpcolor : p1.color = p2.color := hc1.trans hc2.symm
       -- Case split: captures vs non-captures
       by_cases hcap1 : (m1.isCapture || m1.isEnPassant) = true
-      · -- Both are captures (since hcap_or)
-        -- Same file from hpawn_file
+      · -- CAPTURE CASE: fileChar gives same file, cap_rank gives same rank
         have hfc := hpawn_file hp hcap1
-        have hf := fileChar_injective hfc
-        -- Same rank: toSq.rankInt = sq.rankInt + pawnDirection for both
-        have hrank1 := pawn_pieceTargets_cap_rank gs sq1 p1 m1 hp hmem1
-          (by cases hcap1v : m1.isCapture <;> cases hep1v : m1.isEnPassant <;>
-              simp_all [Bool.or_eq_true])
-        have hrank2 := pawn_pieceTargets_cap_rank gs sq2 p2 m2 hp2 hmem2
-          (by rw [hcap] at hcap1; rw [hep] at hcap1
-              cases hcap2v : m2.isCapture <;> cases hep2v : m2.isEnPassant <;>
-              simp_all [Bool.or_eq_true])
-        -- Both have same toSq, so:
-        -- m1.toSq.rankInt = sq1.rankInt + dir1
-        -- m2.toSq.rankInt = sq2.rankInt + dir2
-        -- m1.toSq = m2.toSq, so rankInts match
-        -- dir1 = dir2 (same color → same pawnDirection)
-        -- So sq1.rankInt = sq2.rankInt → sq1.rank = sq2.rank
-        -- Rank equality: from hrank1 and hrank2, sq1 and sq2 have same rankInt
-        -- (requires p1.color = p2.color, which follows from legalMovesForCached filter)
-        -- Strategy: p1.color = gs.toMove (from filter), p2.color = gs.toMove → p1.color = p2.color
-        -- → pawnDirection(p1.color) = pawnDirection(p2.color) → sq1.rankInt = sq2.rankInt
-        sorry
-      · -- Both are non-captures
-        -- Same file: toSq.file = fromSq.file for non-capture pawns
+        have hf_from := fileChar_injective hfc
+        -- hf_from : m1.fromSq.file = m2.fromSq.file → sq1.file = sq2.file
+        have hf : sq1.file = sq2.file := by rw [← hfs1, ← hfs2]; exact hf_from
+        have hcap_or1 : m1.isCapture = true ∨ m1.isEnPassant = true := by
+          cases hc : m1.isCapture <;> cases he : m1.isEnPassant <;> simp_all
+        have hcap_or2 : m2.isCapture = true ∨ m2.isEnPassant = true := by
+          rcases hcap_or1 with h | h
+          · left; rw [← hcap]; exact h
+          · right; rw [← hep]; exact h
+        have hrank1 := pawn_pieceTargets_cap_rank gs sq1 p1 m1 hp1_pawn hmem1 hcap_or1
+        have hrank2 := pawn_pieceTargets_cap_rank gs sq2 p2 m2 hp2_pawn hmem2 hcap_or2
+        have hdir : Movement.pawnDirection p1.color = Movement.pawnDirection p2.color := by
+          rw [hpcolor]
+        have htoRank : m1.toSq.rankInt = m2.toSq.rankInt := by rw [htoSq]
+        have hr : sq1.rank = sq2.rank := rankInt_injective sq1 sq2 (by omega)
+        have hsq_eq : sq1 = sq2 := Square.ext hf hr
+        rw [hfs1, hfs2, hsq_eq]
+      · -- NON-CAPTURE CASE: same file from toSq.fileInt, rank from step structure
         have hcap1f : m1.isCapture = false ∧ m1.isEnPassant = false := by
           cases hc : m1.isCapture <;> cases he : m1.isEnPassant <;> simp_all
         have hcap2f : m2.isCapture = false ∧ m2.isEnPassant = false := by
           rw [hcap] at hcap1f; rw [hep] at hcap1f; exact hcap1f
-        have hfile1 := pawn_pieceTargets_nocap_file gs sq1 p1 m1 hp hmem1 hcap1f
-        have hfile2 := pawn_pieceTargets_nocap_file gs sq2 p2 m2 hp2 hmem2 hcap2f
-        -- m1.toSq.fileInt = sq1.fileInt, m2.toSq.fileInt = sq2.fileInt
-        -- m1.toSq = m2.toSq → sq1.fileInt = sq2.fileInt → sq1.file = sq2.file
+        have hfile1 := pawn_pieceTargets_nocap_file gs sq1 p1 m1 hp1_pawn hmem1 hcap1f
+        have hfile2 := pawn_pieceTargets_nocap_file gs sq2 p2 m2 hp2_pawn hmem2 hcap2f
         have hf : sq1.file = sq2.file := by
-          apply fileInt_injective
-          rw [Square.ext_iff] at *
-          rw [← hfile1, ← hfile2, htoSq]
-        -- For the rank: two non-capture pawn moves to the same square
-        -- from the same file, with the same color. The rank is determined by
-        -- whether it's a single or double step. If one is single and the other
-        -- double, the double stepper's intermediate square would be the single
-        -- stepper's source, which is occupied (from originHasPiece), blocking the double step.
-        -- This requires originHasPiece for both moves plus board state reasoning.
-        -- For now we prove the file equality and leave rank as sorry.
-        rw [← hfs1, ← hfs2]
-        apply Square.ext hf
-        sorry
+          apply fileInt_injective; rw [← hfile1, ← hfile2, htoSq]
+        -- Rank: case split on single/double step, intermediate square blocking argument
+        have hdir : Movement.pawnDirection p1.color = Movement.pawnDirection p2.color := by
+          rw [hpcolor]
+        have hropts1 := pawn_pieceTargets_nocap_rank_options gs sq1 p1 m1 hp1_pawn hmem1 hcap1f
+        have hropts2 := pawn_pieceTargets_nocap_rank_options gs sq2 p2 m2 hp2_pawn hmem2 hcap2f
+        have htoRank : m1.toSq.rankInt = m2.toSq.rankInt := by rw [htoSq]
+        have hsq_file : sq1.fileInt = sq2.fileInt := by rw [← hfile1, ← hfile2, htoSq]
+        -- Prove sq1.rank = sq2.rank by case split on single/double step
+        have hr : sq1.rank = sq2.rank := by
+          apply rankInt_injective
+          rcases hropts1 with hs1 | ⟨hd1, mid1, hmid1_eq, hmid1_empty⟩ <;>
+          rcases hropts2 with hs2 | ⟨hd2, mid2, hmid2_eq, hmid2_empty⟩
+          · -- Both single-step
+            omega
+          · -- m1 single, m2 double: m1's source blocks m2's double-step
+            exfalso
+            have hsq1_rank : sq1.rankInt = sq2.rankInt + Movement.pawnDirection p2.color := by omega
+            have hrt := Movement.squareFromInts_of_coords sq1
+            rw [hsq1_rank, hsq_file] at hrt
+            have hmid2_eq_sq1 : mid2 = sq1 := squareFromInts_det _ _ mid2 sq1 hmid2_eq hrt
+            rw [hmid2_eq_sq1] at hmid2_empty
+            have : gs.board sq1 = some p1 := hbd1
+            simp [Rules.isEmpty, this] at hmid2_empty
+          · -- m1 double, m2 single: symmetric
+            exfalso
+            have hsq2_rank : sq2.rankInt = sq1.rankInt + Movement.pawnDirection p1.color := by omega
+            have hrt := Movement.squareFromInts_of_coords sq2
+            rw [hsq2_rank, hsq_file.symm] at hrt
+            have hmid1_eq_sq2 : mid1 = sq2 := squareFromInts_det _ _ mid1 sq2 hmid1_eq hrt
+            rw [hmid1_eq_sq2] at hmid1_empty
+            have : gs.board sq2 = some p2 := hbd2
+            simp [Rules.isEmpty, this] at hmid1_empty
+          · -- Both double-step
+            omega
+        have hsq_eq : sq1 = sq2 := Square.ext hf hr
+        rw [hfs1, hfs2, hsq_eq]
     · exact same_disambiguation_implies_same_fromSq gs m1 m2 h1 h2 hpt hcolor htoSq hdis hp
   have hpiece : m1.piece = m2.piece := by
     cases hp1 : m1.piece; cases hp2 : m2.piece
