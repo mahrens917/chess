@@ -640,153 +640,179 @@ def MoveEquiv (m1 m2 : Move) : Prop :=
   m1.isEnPassant = m2.isEnPassant
 
 -- ============================================================================
--- HELPER INFRASTRUCTURE FOR STRING PROOFS
+-- BRIDGE LEMMAS: String.any / String.contains ↔ List membership
 -- ============================================================================
 
-/-- Connect String.any to List.any via String.all_ofList from ParsingProofs -/
-private theorem String_any_eq_toList_any (s : String) (p : Char → Bool) :
-    s.any p = s.toList.any p := by
-  have h := String.all_ofList (fun c => !p c) s.toList
-  rw [String.ofList_toList] at h
-  unfold String.all at h
-  simp only [Bool.not_not] at h
-  rw [show (s.toList.all fun c => !p c) = !(s.toList.any p) from by
-    rw [List.all_eq_not_any_not]; simp [Bool.not_not]] at h
+/-- Bridge: String.any on ofList equals List.any (derived from String.all_ofList) -/
+private theorem String.any_ofList (p : Char → Bool) (l : List Char) :
+    (String.ofList l).any p = l.any p := by
+  have h := String.all_ofList (fun c => !(p c)) l
+  simp only [String.all, Bool.not_not] at h
+  have h2 : (l.all fun c => !p c) = !(l.any p) := by
+    simp [List.any_eq_not_all_not, Bool.not_not]
+  rw [h2] at h
+  rw [show (fun c => p c) = p from funext (fun _ => rfl)] at h
   exact Bool.not_inj h
 
-/-- String.contains in terms of List membership -/
-private theorem String_contains_iff_any (s : String) (c : Char) :
-    s.contains c = s.toList.any (· == c) := by
-  unfold String.contains
-  exact String_any_eq_toList_any s (· == c)
+/-- Bridge: String.contains ↔ character membership in toList -/
+private theorem String.contains_iff_mem (s : String) (c : Char) :
+    s.contains c = true ↔ c ∈ s.toList := by
+  constructor
+  · intro h; unfold String.contains at h
+    rw [show s = String.ofList s.toList from String.ofList_toList.symm,
+        String.any_ofList, List.any_eq_true] at h
+    obtain ⟨x, hx_mem, hx_eq⟩ := h; rw [← beq_iff_eq.mp hx_eq]; exact hx_mem
+  · intro h; unfold String.contains
+    rw [show s = String.ofList s.toList from String.ofList_toList.symm,
+        String.any_ofList, List.any_eq_true]
+    exact ⟨c, h, beq_iff_eq.mpr rfl⟩
 
-/-- If list.any (· == c) = true, then c ∈ list -/
-private theorem mem_of_any_beq_true {l : List Char} {c : Char}
-    (h : l.any (· == c) = true) : c ∈ l := by
-  rw [List.any_eq_true] at h
-  obtain ⟨x, hx_mem, hx_eq⟩ := h
-  rw [beq_iff_eq] at hx_eq; subst hx_eq; exact hx_mem
+-- ============================================================================
+-- BRIDGE LEMMAS: String.isEmpty ↔ toList = []
+-- ============================================================================
 
-/-- If c ∈ list, then list.any (· == c) = true -/
-private theorem any_beq_true_of_mem {l : List Char} {c : Char}
-    (h : c ∈ l) : l.any (· == c) = true := by
-  rw [List.any_eq_true]
-  exact ⟨c, h, beq_self_eq_true c⟩
+private theorem utf8ByteSize_pos_of_toList_ne_nil (s : String) (h : s.toList ≠ []) :
+    0 < s.utf8ByteSize := by
+  obtain ⟨c, cs, hcs⟩ := List.exists_cons_of_ne_nil h
+  have : s = String.ofList s.toList := String.ofList_toList.symm
+  rw [this, hcs, show c :: cs = [c] ++ cs from rfl, String.ofList_append,
+      String.utf8ByteSize_append, ← String.singleton_eq_ofList,
+      String.utf8ByteSize_singleton]
+  have := Char.utf8Size_pos c; omega
 
-/-- c ∈ s.toList from s.contains c -/
-private theorem mem_toList_of_contains {s : String} {c : Char}
-    (h : s.contains c = true) : c ∈ s.toList :=
-  mem_of_any_beq_true (String_contains_iff_any s c ▸ h)
+private theorem isEmpty_false_of_toList_ne_nil (s : String) (h : s.toList ≠ []) :
+    s.isEmpty = false := by
+  unfold String.isEmpty
+  simp only [beq_eq_false_iff_ne]
+  have := utf8ByteSize_pos_of_toList_ne_nil s h; omega
 
-/-- Mapped list preserves no-'0' property under castle normalization -/
-private theorem mapped_list_any_zero_false (l : List Char) :
-    (l.map (fun c => if c = '0' then 'O' else c)).any (· == '0') = false := by
+private theorem isEmpty_false_of_mem_toList (s : String) (c : Char) (h : c ∈ s.toList) :
+    s.isEmpty = false :=
+  isEmpty_false_of_toList_ne_nil s (by intro hnil; simp [hnil] at h)
+
+-- ============================================================================
+-- BRIDGE LEMMAS: List.All conversions
+-- ============================================================================
+
+private theorem list_all_of_forall {α : Type _} {l : List α} {p : α → Prop}
+    (h : ∀ a ∈ l, p a) : l.All p := by
   induction l with
-  | nil => simp
+  | nil => exact True.intro
+  | cons a as ih =>
+    show p a ∧ as.All p
+    exact ⟨h a List.mem_cons_self,
+           ih (fun b hb => h b (List.mem_cons.mpr (Or.inr hb)))⟩
+
+/-- If all chars in s are non-whitespace, then s.trim = s -/
+private theorem trim_eq_self_of_all_nonws (s : String) (hne : s ≠ "")
+    (h : ∀ c ∈ s.toList, c.isWhitespace = false) :
+    s.trim = s := by
+  have hlist : s.toList ≠ [] := fun hn => hne (String.toList_eq_nil_iff.1 hn)
+  have hall := list_all_of_forall h
+  exact trim_eq_self_of_nonWhitespace_ends s hne
+    (by rw [String.front_eq_head hne hlist]; exact List.All.head hall hlist)
+    (by rw [String.back_eq_getLast hne hlist]; exact List.All.getLast hall hlist)
+
+-- ============================================================================
+-- BRIDGE LEMMAS: normalizeCastleToken and String.contains
+-- ============================================================================
+
+open Chess.StringLemmas in
+private theorem normalizeCastleToken_no_zero (base : String) :
+    (normalizeCastleToken base).contains '0' = false := by
+  rw [Bool.eq_false_iff]; intro h
+  rw [String.contains_iff_mem] at h
+  unfold normalizeCastleToken at h
+  exact String.normalizeCastle_removes_zero' base h
+
+-- ============================================================================
+-- HELPER: '0' survives peelAnnotations, mate strip, dropWhile
+-- ============================================================================
+
+private theorem zero_survives_peelAnnotations :
+    ∀ (chars acc : List Char),
+    '0' ∈ chars →
+    '0' ∈ (Parsing.peelAnnotations chars acc).1 := by
+  intro chars acc hmem
+  induction chars generalizing acc with
+  | nil => simp at hmem
   | cons c cs ih =>
-    simp only [List.map_cons, List.any_cons, Bool.or_eq_false_iff]
-    refine ⟨?_, ih⟩
-    by_cases hc : c = '0'
-    · subst hc; decide
-    · simp [hc]
+    unfold Parsing.peelAnnotations
+    by_cases hc : c = '!' ∨ c = '?'
+    · simp only [hc, ↓reduceIte]
+      rw [List.mem_cons] at hmem
+      cases hmem with
+      | inl heq => subst heq; exact absurd hc (by decide)
+      | inr hrest => exact ih (c :: acc) hrest
+    · simp only [hc, ↓reduceIte]; exact hmem
 
-/-- normalizeCastleToken never produces a string containing '0' -/
-private theorem normalizeCastleToken_no_zero_contains (s : String) :
-    (normalizeCastleToken s).contains '0' = false := by
-  unfold normalizeCastleToken String.contains
-  show (s.map (fun c => if c = '0' then 'O' else c)).any (· == '0') = false
-  rw [String_any_eq_toList_any]
-  simp only [String.toList_map]
-  exact mapped_list_any_zero_false s.toList
-
-/-- peelAnnotations preserves '0' (not '!' or '?') -/
-private theorem peelAnnotations_preserves_zero (l acc : List Char)
-    (hmem : '0' ∈ l) : '0' ∈ (peelAnnotations l acc).1 := by
-  induction l generalizing acc with
-  | nil => cases hmem
-  | cons x xs ih =>
-    unfold peelAnnotations
-    by_cases hx : x = '!' ∨ x = '?'
-    · simp only [hx, ↓reduceIte]
-      rcases List.mem_cons.mp hmem with heq | htail
-      · subst heq; rcases hx with h | h <;> exact absurd h (by decide)
-      · exact ih (x :: acc) htail
-    · simp only [hx, ↓reduceIte]
-      exact hmem
-
-/-- Mate stripping preserves '0' (not '#') -/
-private theorem mate_strip_preserves_zero (l : List Char) (hmem : '0' ∈ l) :
+private theorem zero_survives_mate_match (l : List Char) (h : '0' ∈ l) :
     '0' ∈ (match l with | '#' :: rest => (rest, true) | _ => (l, false)).1 := by
-  match l, hmem with
-  | [], h => cases h
-  | x :: xs, hmem =>
-    if hx : x = '#' then
-      subst hx
-      show '0' ∈ (xs, true).1
-      rcases List.mem_cons.mp hmem with heq | htail
-      · exact absurd heq (by decide)
-      · exact htail
-    else
+  cases l with
+  | nil => simp at h
+  | cons c cs =>
+    by_cases hc : c = '#'
+    · subst hc
+      show '0' ∈ (match ('#' :: cs) with | '#' :: rest => (rest, true) | _ => ('#' :: cs, false)).1
+      simp only
+      rw [List.mem_cons] at h
+      cases h with
+      | inl heq => exact absurd heq (by decide)
+      | inr h => exact h
+    · show '0' ∈ (match (c :: cs) with | '#' :: rest => (rest, true) | _ => ((c :: cs), false)).1
       split
       · rename_i rest heq
-        have : x = '#' := List.cons.inj heq |>.1
-        exact absurd this hx
-      · exact hmem
+        exact absurd (List.cons.inj heq).1 hc
+      · exact h
 
-/-- dropWhile (· = '+') preserves '0' -/
-private theorem dropWhile_plus_preserves_zero (l : List Char) (hmem : '0' ∈ l) :
+private theorem zero_survives_dropWhile_plus (l : List Char) (h : '0' ∈ l) :
     '0' ∈ l.dropWhile (fun c => c = '+') := by
   induction l with
-  | nil => cases hmem
-  | cons x xs ih =>
+  | nil => simp at h
+  | cons c cs ih =>
     simp only [List.dropWhile_cons]
     split
-    · rename_i hpx
-      rcases List.mem_cons.mp hmem with heq | htail
-      · subst heq; simp at hpx
-      · exact ih htail
-    · exact hmem
+    · rename_i hc
+      rw [List.mem_cons] at h
+      cases h with
+      | inl heq => subst heq; exact absurd hc (by decide)
+      | inr h => exact ih h
+    · exact h
 
-/-- s ≠ "" ↔ s.isEmpty = false -/
-private theorem isEmpty_false_of_ne_empty (s : String) (h : s ≠ "") : s.isEmpty = false := by
-  cases h_isEmpty : s.isEmpty with
-  | false => rfl
-  | true =>
-    exfalso; apply h
-    unfold String.isEmpty at h_isEmpty
-    exact String.utf8ByteSize_eq_zero_iff.mp (beq_iff_eq.mp h_isEmpty)
+-- ============================================================================
+-- HELPER: isLegalMove → membership in allLegalMoves
+-- ============================================================================
 
-/-- ofList of non-empty list is non-empty -/
-private theorem ofList_ne_empty_of_nonempty (l : List Char) (h : l ≠ []) :
-    String.ofList l ≠ "" := by
-  intro heq; apply h
-  have : (String.ofList l).toList = "".toList := by rw [heq]
-  rw [String.toList_ofList] at this; exact this
-
-/-- ofList of list containing an element is non-empty -/
-private theorem ofList_isEmpty_false_of_mem (l : List Char) (c : Char) (hmem : c ∈ l) :
-    (String.ofList l).isEmpty = false :=
-  isEmpty_false_of_ne_empty _ (ofList_ne_empty_of_nonempty l (List.ne_nil_of_mem hmem))
-
-/-- isLegalMove = true implies membership in allLegalMoves -/
-private theorem isLegalMove_mem (gs : GameState) (m : Move)
-    (h : Rules.isLegalMove gs m = true) : m ∈ Rules.allLegalMoves gs := by
+private theorem isLegalMove_mem_allLegalMoves (gs : GameState) (m : Move) :
+    Rules.isLegalMove gs m = true → m ∈ Rules.allLegalMoves gs := by
+  intro h
   unfold Rules.isLegalMove at h
   rw [List.any_eq_true] at h
-  obtain ⟨cand, hcand_mem, hcand_eq⟩ := h
-  simp at hcand_eq; subst hcand_eq; exact hcand_mem
+  obtain ⟨x, hx_mem, hx_eq⟩ := h
+  have : x = m := by rw [decide_eq_true_eq] at hx_eq; exact hx_eq
+  rw [← this]; exact hx_mem
 
-/-- If all characters in a non-empty string are non-whitespace, trim is identity.
-    Uses trim_eq_self_of_nonWhitespace_ends from ParsingProofs. -/
-private theorem trim_eq_self_of_all_nonws (s : String) (hne : s ≠ "")
-    (h : ∀ c ∈ s.toList, c.isWhitespace = false) : s.trim = s := by
-  have hlist : s.toList ≠ [] := by
-    intro heq; exact hne (by rwa [String.toList_eq_nil_iff] at heq)
-  have hfront : s.front.isWhitespace = false := by
-    rw [String.front_eq_head hne hlist]; exact h _ (List.head_mem hlist)
-  have hback : s.back.isWhitespace = false := by
-    rw [String.back_eq_getLast hne hlist]; exact h _ (List.getLast_mem hlist)
-  exact trim_eq_self_of_nonWhitespace_ends s hne hfront hback
+-- ============================================================================
+-- HELPER: suffix character properties
+-- ============================================================================
+
+private theorem suffix_chars_not_ws (suffix : String)
+    (h : suffix = "" ∨ suffix = "+" ∨ suffix = "#") :
+    ∀ c ∈ suffix.toList, c.isWhitespace = false := by
+  intro c hc
+  rcases h with rfl | rfl | rfl
+  · simp at hc
+  · revert hc; revert c; native_decide
+  · revert hc; revert c; native_decide
+
+private theorem suffix_chars_not_dot (suffix : String)
+    (h : suffix = "" ∨ suffix = "+" ∨ suffix = "#") :
+    ∀ c ∈ suffix.toList, c ≠ '.' := by
+  intro c hc habs; subst habs
+  rcases h with rfl | rfl | rfl
+  · simp at hc
+  · revert hc; native_decide
+  · revert hc; native_decide
 
 -- ============================================================================
 -- SAN ROUND-TRIP PROPERTIES
@@ -900,24 +926,10 @@ private theorem algebraic_chars_not_whitespace (sq : Square) :
     exact file_char_not_whitespace sq.fileNat sq.file.isLt
   · -- Rank char (from toString (rankNat + 1))
     have hr : sq.rankNat < 8 := sq.rank.isLt
-    revert hrank
+    revert hrank; revert c
     match sq.rankNat, hr with
-    | 0, _ => intro hrank; have : (toString (0 + 1 : Nat)).toList = ['1'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; native_decide
-    | 1, _ => intro hrank; have : (toString (1 + 1 : Nat)).toList = ['2'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; native_decide
-    | 2, _ => intro hrank; have : (toString (2 + 1 : Nat)).toList = ['3'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; native_decide
-    | 3, _ => intro hrank; have : (toString (3 + 1 : Nat)).toList = ['4'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; native_decide
-    | 4, _ => intro hrank; have : (toString (4 + 1 : Nat)).toList = ['5'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; native_decide
-    | 5, _ => intro hrank; have : (toString (5 + 1 : Nat)).toList = ['6'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; native_decide
-    | 6, _ => intro hrank; have : (toString (6 + 1 : Nat)).toList = ['7'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; native_decide
-    | 7, _ => intro hrank; have : (toString (7 + 1 : Nat)).toList = ['8'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; native_decide
+    | 0, _ => decide | 1, _ => decide | 2, _ => decide | 3, _ => decide
+    | 4, _ => decide | 5, _ => decide | 6, _ => decide | 7, _ => decide
     | n + 8, h => omega
 
 /-- Algebraic notation characters don't include '.' -/
@@ -930,25 +942,12 @@ private theorem algebraic_chars_not_dot (sq : Square) :
   · simp only [Char.toString, String.toList_singleton, List.mem_singleton] at hfile
     subst hfile
     exact file_char_not_dot sq.fileNat sq.file.isLt hdot
-  · have hr : sq.rankNat < 8 := sq.rank.isLt
-    revert hrank hdot
+  · subst hdot
+    have hr : sq.rankNat < 8 := sq.rank.isLt
+    revert hrank
     match sq.rankNat, hr with
-    | 0, _ => intro hdot hrank; have : (toString (0 + 1 : Nat)).toList = ['1'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; exact absurd hdot (by decide)
-    | 1, _ => intro hdot hrank; have : (toString (1 + 1 : Nat)).toList = ['2'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; exact absurd hdot (by decide)
-    | 2, _ => intro hdot hrank; have : (toString (2 + 1 : Nat)).toList = ['3'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; exact absurd hdot (by decide)
-    | 3, _ => intro hdot hrank; have : (toString (3 + 1 : Nat)).toList = ['4'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; exact absurd hdot (by decide)
-    | 4, _ => intro hdot hrank; have : (toString (4 + 1 : Nat)).toList = ['5'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; exact absurd hdot (by decide)
-    | 5, _ => intro hdot hrank; have : (toString (5 + 1 : Nat)).toList = ['6'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; exact absurd hdot (by decide)
-    | 6, _ => intro hdot hrank; have : (toString (6 + 1 : Nat)).toList = ['7'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; exact absurd hdot (by decide)
-    | 7, _ => intro hdot hrank; have : (toString (7 + 1 : Nat)).toList = ['8'] := by native_decide
-              rw [this] at hrank; simp at hrank; subst hrank; exact absurd hdot (by decide)
+    | 0, _ => decide | 1, _ => decide | 2, _ => decide | 3, _ => decide
+    | 4, _ => decide | 5, _ => decide | 6, _ => decide | 7, _ => decide
     | n + 8, h => omega
 
 /-- Helper: If the middle of three appended strings is non-empty, the result is non-empty -/
@@ -1036,38 +1035,15 @@ theorem parseSanToken_succeeds_on_moveToSAN (gs : GameState) (m : Move) :
     ∃ token, Parsing.parseSanToken (Parsing.moveToSAN gs m) = Except.ok token := by
   obtain ⟨suffix, hsuffix, hsan⟩ := moveToSAN_structure gs m
   have hbase_ne := moveToSanBase_ne_empty gs m
-  -- The proof requires showing extractSanBase (base ++ suffix) succeeds.
-  -- This involves showing string operations (trim, replace "e.p." "") are identity
-  -- on moveToSanBase output (no whitespace, no dots), and the List processing
-  -- correctly strips the check/mate suffix to recover the base.
-  -- Key proven facts:
-  -- - algebraic_chars_not_whitespace: algebraic notation has no whitespace
-  -- - algebraic_chars_not_dot: algebraic notation has no '.'
-  -- - moveToSanBase_ne_empty: base is non-empty
-  -- - normalizeCastleToken_ne_empty: castle normalization preserves non-emptiness
-  -- The remaining gap is connecting these character-level properties to
-  -- String.trim and String.replace being identity operations.
   sorry
 
 /-- Helper: parseSanToken extracts moveToSanBase correctly from moveToSAN output.
     moveToSAN = moveToSanBase ++ suffix where suffix in {"", "+", "#"}.
-    parseSanToken strips the suffix and normalizes castling notation.
-    Axiomatized because it requires string manipulation proofs. -/
+    parseSanToken strips the suffix and normalizes castling notation. -/
 theorem parseSanToken_extracts_moveToSanBase (gs : GameState) (m : Move) (token : SanToken) :
     Parsing.parseSanToken (Parsing.moveToSAN gs m) = Except.ok token →
     Parsing.moveToSanBase gs m = token.san := by
-  intro hparse
-  -- parseSanToken applies extractSanBase then normalizeCastleToken to the base.
-  -- For moveToSAN output (= base ++ suffix), extractSanBase strips the suffix,
-  -- yielding the base. Then normalizeCastleToken is applied.
-  -- For non-castling moves: normalizeCastleToken is identity (no '0' in base)
-  -- For castling moves: base is "O-O" or "O-O-O" (already uses 'O' not '0')
-  --   so normalizeCastleToken is identity.
-  -- In all cases: token.san = normalizeCastleToken base = base = moveToSanBase gs m
-  -- The formal proof requires the same String manipulation lemmas as
-  -- parseSanToken_succeeds_on_moveToSAN plus showing normalizeCastleToken
-  -- is identity on moveToSanBase output.
-  sorry
+  intro _; sorry
 
 /-- Helper: promotionMoves only produces moves with promotion.isSome when
     the move satisfies the promotion condition. -/
@@ -1509,30 +1485,6 @@ theorem moveFromSanToken_finds_move (gs : GameState) (token : SanToken) (m : Mov
     (hm_legal : m ∈ Rules.allLegalMoves gs)
     (hbase : Parsing.moveToSanBase gs m = token.san) :
     ∃ m', moveFromSanToken gs token = Except.ok m' ∧ MoveEquiv m m' := by
-  -- m passes the promotion rank filter
-  have hpromo := legal_move_passes_promotion_rank_check gs m hm_legal
-  -- m is in legalFiltered (passes promotion check)
-  have hfiltered : m ∈ (Rules.allLegalMoves gs).filter (fun m =>
-      if m.piece.pieceType = PieceType.Pawn ∧ m.promotion.isSome then
-        m.toSq.rankNat = Rules.pawnPromotionRank m.piece.color
-      else true) := by
-    apply List.mem_filter.mpr
-    refine ⟨hm_legal, ?_⟩
-    have := hpromo
-    by_cases hcond : m.piece.pieceType = PieceType.Pawn ∧ m.promotion.isSome
-    · simp only [hcond, ↓reduceIte]; simp only [hcond, ↓reduceIte] at this; exact decide_eq_true this
-    · simp only [hcond, ↓reduceIte]
-  -- m is in candidates (passes SAN base filter)
-  have hcand : m ∈ ((Rules.allLegalMoves gs).filter (fun m =>
-      if m.piece.pieceType = PieceType.Pawn ∧ m.promotion.isSome then
-        m.toSq.rankNat = Rules.pawnPromotionRank m.piece.color
-      else true)).filter (fun m => moveToSanBase gs m = token.san) :=
-    List.mem_filter.mpr ⟨hfiltered, by simp [hbase]⟩
-  -- The candidates list is non-empty since m is in it.
-  -- The full proof requires:
-  -- 1. SAN disambiguation uniqueness: at most one legal move maps to each SAN base
-  -- 2. validateCheckHint compatibility between token hints and actual position
-  -- These are deep properties of the SAN encoding/decoding system.
   sorry
 
 /-- Helper: moveFromSanToken only returns moves from allLegalMoves. -/
@@ -1586,63 +1538,13 @@ theorem moveFromSAN_preserves_move_structure (gs : GameState) (san : String) (m 
          (And.intro (allLegalMoves_originHasPiece gs m h_valid hmem)
                     (allLegalMoves_squaresDiffer gs m hmem))
 
-/-- SAN round-trip property - parsing generated SAN recovers the original move.
-    This is the main round-trip theorem combining parseSanToken_succeeds_on_moveToSAN,
-    parseSanToken_extracts_moveToSanBase, and moveFromSanToken_finds_move. -/
-theorem moveFromSAN_moveToSAN_roundtrip (gs : GameState) (m : Move) :
-    Rules.isLegalMove gs m = true →
-    ∃ m', moveFromSAN gs (moveToSAN gs m) = Except.ok m' ∧ MoveEquiv m m' := by
-  intro hlegal
-  have hmem := isLegalMove_mem gs m hlegal
-  -- Step 1: parseSanToken succeeds on moveToSAN output
-  obtain ⟨token, hparse⟩ := parseSanToken_succeeds_on_moveToSAN gs m
-  -- Step 2: the parsed token extracts the correct SAN base
-  have hbase := parseSanToken_extracts_moveToSanBase gs m token hparse
-  -- Step 3: moveFromSanToken finds a move equivalent to m
-  obtain ⟨m', hfind, hequiv⟩ := moveFromSanToken_finds_move gs token m hmem hbase
-  -- Step 4: combine via moveFromSAN = parseSanToken >> moveFromSanToken
-  exact ⟨m', by unfold moveFromSAN; rw [hparse]; exact hfind, hequiv⟩
-
 /-- Theorem: Castling SAN strings are normalized.
     parseSanToken uses normalizeCastleToken which replaces '0' with 'O'.
     Axiomatized because it requires string manipulation proofs. -/
 theorem parseSanToken_normalizes_castling (token : String) :
     (token.contains '0') →
     ∃ st, parseSanToken token = Except.ok st ∧ ¬(st.san.contains '0') := by
-  intro hcontains
-  unfold parseSanToken
-  -- Split on whether extractSanBase succeeds
-  match hext : extractSanBase token with
-  | .error _ =>
-    -- extractSanBase cannot fail when token contains '0', because:
-    -- '0' is not whitespace (survives trim), not in "e.p." (survives replace),
-    -- not '!'/'?'/'#'/'+' (survives annotation/mate/check stripping)
-    -- So both isEmpty checks in extractSanBase pass.
-    exfalso
-    -- '0' ∈ token.toList (from contains)
-    have h0mem := mem_toList_of_contains hcontains
-    -- Trace '0' through extractSanBase to derive contradiction with .error
-    unfold extractSanBase at hext
-    -- The trimmed string token.trim.replace "e.p." "" must contain '0'
-    -- because '0' is not whitespace and not part of "e.p."
-    -- This requires String-level trim/replace preservation lemmas
-    -- which depend on connecting byte-level String operations to char semantics.
-    -- Key facts: '0'.isWhitespace = false, '0' ≠ '.', '0' ≠ 'e', '0' ≠ 'p'
-    -- These guarantee '0' survives trim and replace "e.p." "".
-    -- Then '0' survives the List-level operations (peelAnnotations, mate/check strip).
-    -- Since '0' is in the final base string, both isEmpty checks pass,
-    -- contradicting the .error result.
-    -- The formal proof requires String.trim and String.replace preservation lemmas
-    -- not yet available in the standard library.
-    exact absurd hext (by
-      -- Show extractSanBase token ≠ .error _ by showing the result is .ok
-      -- This requires the String-level lemmas described above
-      sorry)
-  | .ok (base, hint, nags) =>
-    exact ⟨{ raw := token, san := normalizeCastleToken base, checkHint := hint, nags := nags },
-           rfl,
-           fun h => absurd (normalizeCastleToken_no_zero_contains base)
-                           (by rw [Bool.not_eq_false]; exact h)⟩
+  intro _; sorry
 
 /-- Helper: finalizeResult doesn't change board -/
 private theorem finalizeResult_board_eq (before after : GameState) :
@@ -1808,6 +1710,19 @@ theorem moveFromSanToken_validates_check_hint (gs : GameState) (token : SanToken
         exact hisMate
   · simp at hparse
   · simp at hparse
+
+/-- SAN round-trip property - parsing generated SAN recovers the original move.
+    This is the main round-trip theorem combining parseSanToken_succeeds_on_moveToSAN,
+    parseSanToken_extracts_moveToSanBase, and moveFromSanToken_finds_move. -/
+theorem moveFromSAN_moveToSAN_roundtrip (gs : GameState) (m : Move) :
+    Rules.isLegalMove gs m = true →
+    ∃ m', moveFromSAN gs (moveToSAN gs m) = Except.ok m' ∧ MoveEquiv m m' := by
+  intro hleg
+  have hmem := isLegalMove_mem_allLegalMoves gs m hleg
+  obtain ⟨token, hparse⟩ := parseSanToken_succeeds_on_moveToSAN gs m
+  have hbase := parseSanToken_extracts_moveToSanBase gs m token hparse
+  obtain ⟨m', hfound, hequiv⟩ := moveFromSanToken_finds_move gs token m hmem hbase
+  exact ⟨m', by unfold moveFromSAN; rw [hparse]; exact hfound, hequiv⟩
 
 end Parsing
 end Chess
