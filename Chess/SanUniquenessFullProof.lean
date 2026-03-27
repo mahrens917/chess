@@ -500,6 +500,198 @@ theorem noncastle_legal_castle_none (gs : GameState) (m : Move)
       exact pieceTargets_castle_none gs sq p m h2.1 hnc
 
 -- ============================================================================
+-- SECTION 5b: HELPER LEMMAS FOR STRING DECOMPOSITION
+-- ============================================================================
+
+/-- promotionSuffix is injective: same suffix string → same promotion -/
+private theorem promotionSuffix_injective (m1 m2 : Move)
+    (h : promotionSuffix m1 = promotionSuffix m2) : m1.promotion = m2.promotion := by
+  unfold promotionSuffix at h
+  match hp1 : m1.promotion, hp2 : m2.promotion with
+  | none, none => rfl
+  | none, some pt2 =>
+    simp only [hp1, hp2] at h
+    have hlen := congrArg String.length h
+    simp [String.length_append] at hlen
+    have : (toString "=").length = 1 := by native_decide
+    omega
+  | some pt1, none =>
+    simp only [hp1, hp2] at h
+    have hlen := congrArg String.length h
+    simp [String.length_append] at hlen
+    have : (toString "=").length = 1 := by native_decide
+    omega
+  | some pt1, some pt2 =>
+    simp only [hp1, hp2] at h
+    congr 1
+    apply pieceLetter_injective
+    have hlist := congrArg String.toList h
+    simp [String.toList_append] at hlist
+    exact String.toList_inj.mp hlist
+
+/-- sanDisambiguation for pawns is empty -/
+private theorem sanDisambiguation_pawn (gs : GameState) (m : Move)
+    (hp : m.piece.pieceType = PieceType.Pawn) :
+    sanDisambiguation gs m = "" := by
+  unfold sanDisambiguation
+  simp [hp]
+
+/-- algebraic.toList has the form [fileChar, rankChar] -/
+private theorem algebraic_toList_form (sq : Square) :
+    sq.algebraic.toList = [sq.fileChar, sq.rankChar] := by
+  have : ∀ (f r : Fin 8),
+    ({ file := f, rank := r } : Square).algebraic.toList =
+    [({ file := f, rank := r } : Square).fileChar, ({ file := f, rank := r } : Square).rankChar] := by
+    native_decide
+  exact this sq.file sq.rank
+
+/-- rankChar is never 'x' -/
+private theorem rankChar_ne_x (sq : Square) : sq.rankChar ≠ 'x' := by
+  have : ∀ (f r : Fin 8), ({ file := f, rank := r } : Square).rankChar ≠ 'x' := by native_decide
+  exact this sq.file sq.rank
+
+/-- rankChar is injective -/
+private theorem rankChar_injective {s1 s2 : Square}
+    (h : s1.rankChar = s2.rankChar) : s1.rank = s2.rank := by
+  have : ∀ (f1 f2 : Fin 8) (r1 r2 : Fin 8),
+      ({ file := f1, rank := r1 } : Square).rankChar =
+      ({ file := f2, rank := r2 } : Square).rankChar →
+      r1 = r2 := by native_decide
+  exact this s1.file s2.file s1.rank s2.rank h
+
+/-- 'x' is not in a singleton fileChar string -/
+private theorem x_not_in_singleton_fileChar (sq : Square) :
+    'x' ∉ (String.singleton sq.fileChar).toList := by
+  simp only [String.toList_singleton, List.mem_singleton]
+  intro h
+  have : ∀ (f r : Fin 8), ({ file := f, rank := r } : Square).fileChar ≠ 'x' := by native_decide
+  exact this sq.file sq.rank h.symm
+
+/-- 'x' is not in a singleton rankChar string -/
+private theorem x_not_in_singleton_rankChar (sq : Square) :
+    'x' ∉ (String.singleton sq.rankChar).toList := by
+  simp only [String.toList_singleton, List.mem_singleton]
+  intro h
+  have : ∀ (f r : Fin 8), ({ file := f, rank := r } : Square).rankChar ≠ 'x' := by native_decide
+  exact this sq.file sq.rank h.symm
+
+/-- Characters in sanDisambiguation are fileChar or rankChar of fromSq -/
+private theorem sanDisambiguation_chars (gs : GameState) (m : Move) (c : Char)
+    (hc : c ∈ (sanDisambiguation gs m).toList) :
+    c = m.fromSq.fileChar ∨ c = m.fromSq.rankChar := by
+  unfold sanDisambiguation at hc
+  by_cases hp : m.piece.pieceType = PieceType.Pawn
+  · simp [hp] at hc
+  · simp only [hp, ↓reduceIte] at hc
+    generalize (Rules.allLegalMoves gs |>.filter _) = peers at hc
+    by_cases he : peers.isEmpty = true
+    · simp [he] at hc
+    · simp only [he, ↓reduceIte] at hc
+      generalize peers.any (fun p => decide (p.fromSq.file = m.fromSq.file)) = fc at hc
+      generalize peers.any (fun p => decide (p.fromSq.rank = m.fromSq.rank)) = rc at hc
+      cases fc <;> cases rc <;>
+        simp_all [String.toList_singleton, String.toList_append, List.mem_singleton, List.mem_cons]
+
+/-- 'x' does not appear in sanDisambiguation output -/
+private theorem x_not_in_sanDisambiguation (gs : GameState) (m : Move) :
+    'x' ∉ (sanDisambiguation gs m).toList := by
+  intro hc
+  rcases sanDisambiguation_chars gs m 'x' hc with h1 | h2
+  · have : ∀ (f r : Fin 8), ({ file := f, rank := r } : Square).fileChar ≠ 'x' := by native_decide
+    exact this m.fromSq.file m.fromSq.rank h1.symm
+  · have : ∀ (f r : Fin 8), ({ file := f, rank := r } : Square).rankChar ≠ 'x' := by native_decide
+    exact this m.fromSq.file m.fromSq.rank h2.symm
+
+/-- 'x' does not appear in algebraic output -/
+private theorem x_not_in_algebraic (sq : Square) : 'x' ∉ sq.algebraic.toList := by
+  have : ∀ (f r : Fin 8), 'x' ∉ ({ file := f, rank := r } : Square).algebraic.toList := by native_decide
+  exact this sq.file sq.rank
+
+/-- 'x' does not appear in promotionSuffix output -/
+private theorem x_not_in_promotionSuffix (m : Move) : 'x' ∉ (promotionSuffix m).toList := by
+  unfold promotionSuffix
+  match m.promotion with
+  | none => simp
+  | some pt =>
+    simp only [String.toList_append, List.mem_append]
+    intro h
+    rcases h with h1 | h2
+    · have : (toString "=").toList = ['='] := by native_decide
+      rw [this] at h1; simp only [List.mem_singleton] at h1
+      exact absurd h1 (by native_decide)
+    · cases pt <;> (simp [pieceLetter] at h2; exact absurd h2 (by native_decide))
+
+/-- 'x' does not appear in pieceLetter for non-Pawn -/
+private theorem x_not_in_pieceLetter (pt : PieceType) (hnp : pt ≠ PieceType.Pawn) :
+    'x' ∉ (pieceLetter pt).toList := by
+  cases pt <;> simp_all [pieceLetter] <;> native_decide
+
+/-- 'x' appears in piece SAN (non-pawn, non-castle) iff capture -/
+private theorem x_not_in_piece_san_nocap (gs : GameState) (m : Move)
+    (hnc : m.isCastle = false) (hnp : m.piece.pieceType ≠ PieceType.Pawn)
+    (hcap : (m.isCapture || m.isEnPassant) = false) :
+    'x' ∉ (moveToSanBase gs m).toList := by
+  intro hmem
+  have hsan : moveToSanBase gs m =
+    pieceLetter m.piece.pieceType ++ sanDisambiguation gs m ++ "" ++ m.toSq.algebraic ++ promotionSuffix m := by
+    unfold moveToSanBase; simp [hnc, hnp, hcap]
+  rw [hsan] at hmem
+  simp only [String.toList_append, List.mem_append, String.toList_empty, List.not_mem_nil,
+             or_false] at hmem
+  rcases hmem with ((h1 | h2) | h4) | h5
+  · exact x_not_in_pieceLetter m.piece.pieceType hnp h1
+  · exact x_not_in_sanDisambiguation gs m h2
+  · exact x_not_in_algebraic m.toSq h4
+  · exact x_not_in_promotionSuffix m h5
+
+private theorem x_mem_piece_san_iff (gs : GameState) (m : Move)
+    (hnc : m.isCastle = false) (hnp : m.piece.pieceType ≠ PieceType.Pawn) :
+    'x' ∈ (moveToSanBase gs m).toList ↔ (m.isCapture || m.isEnPassant) = true := by
+  constructor
+  · intro hmem
+    by_cases hcap : (m.isCapture || m.isEnPassant) = true
+    · exact hcap
+    · exfalso
+      have hcapf : (m.isCapture || m.isEnPassant) = false := by
+        cases h : m.isCapture || m.isEnPassant
+        · rfl
+        · exact absurd h hcap
+      exact x_not_in_piece_san_nocap gs m hnc hnp hcapf hmem
+  · intro hcap
+    have hsan : moveToSanBase gs m =
+      pieceLetter m.piece.pieceType ++ sanDisambiguation gs m ++ "x" ++ m.toSq.algebraic ++ promotionSuffix m := by
+      unfold moveToSanBase; simp [hnc, hnp, hcap]
+    have hx : 'x' ∈ ("x" : String).toList := by native_decide
+    -- Transport membership through the string equality
+    have hlist_eq : (moveToSanBase gs m).toList =
+      (pieceLetter m.piece.pieceType ++ sanDisambiguation gs m ++ "x" ++
+       m.toSq.algebraic ++ promotionSuffix m).toList := congrArg String.toList hsan
+    rw [hlist_eq]
+    simp only [String.toList_append, List.mem_append]
+    left; left; right; exact hx
+
+/-- list_append_cancel_right: if suffix lengths match, both parts match -/
+private theorem list_append_cancel_right {α : Type} (l1 l2 l3 l4 : List α)
+    (hlen : l2.length = l4.length) (h : l1 ++ l2 = l3 ++ l4) :
+    l1 = l3 ∧ l2 = l4 := by
+  have hlen_total := congrArg List.length h
+  simp [List.length_append] at hlen_total
+  exact list_append_cancel_left l1 l2 l3 l4 (by omega) h
+
+/-- pieceLetter has length 1 for non-Pawn (String.length version) -/
+private theorem pieceLetter_length (pt : PieceType) (hnp : pt ≠ PieceType.Pawn) :
+    (pieceLetter pt).length = 1 := by
+  cases pt <;> simp_all [pieceLetter] <;> native_decide
+
+/-- promotionSuffix has length 0, 1, or 2 (normally 0 or 2, 1 only for Pawn promotion) -/
+private theorem promotionSuffix_length (m : Move) :
+    (promotionSuffix m).toList.length ≤ 2 := by
+  unfold promotionSuffix
+  match m.promotion with
+  | none => simp
+  | some pt => simp [String.toList_append]; cases pt <;> simp [pieceLetter] <;> native_decide
+
+-- ============================================================================
 -- SECTION 6: CORE STRING DECOMPOSITION
 -- ============================================================================
 
@@ -534,7 +726,55 @@ private theorem moveToSanBase_eq_implies_fields (gs : GameState) (m1 m2 : Move)
   by_cases hp1 : m1.piece.pieceType = PieceType.Pawn
   · by_cases hp2 : m2.piece.pieceType = PieceType.Pawn
     · -- Both pawns: string decomposition
-      sorry
+      unfold moveToSanBase at hbase
+      simp only [hnc1, hnc2, hp1, hp2, ↓reduceIte, Bool.false_eq_true] at hbase
+      have hlist := congrArg String.toList hbase
+      simp only [String.toList_append] at hlist
+      -- Case split on capture flags
+      by_cases hc1 : (m1.isCapture || m1.isEnPassant) = true <;>
+      by_cases hc2 : (m2.isCapture || m2.isEnPassant) = true
+      · -- Both captures: [fc1, 'x'] ++ alg1 ++ prom1 = [fc2, 'x'] ++ alg2 ++ prom2
+        simp only [hc1, hc2, ↓reduceIte, String.toList_singleton] at hlist
+        simp only [List.cons_append, List.nil_append, List.append_assoc] at hlist
+        have hfc := (List.cons.inj hlist).1
+        have htail := (List.cons.inj (List.cons.inj hlist).2).2
+        have halg_len := (algebraic_toList_length m1.toSq).trans (algebraic_toList_length m2.toSq).symm
+        have ⟨halg, hprom⟩ := list_append_cancel_left _ _ _ _ halg_len htail
+        refine ⟨hp1.trans hp2.symm, algebraic_injective (String.toList_inj.mp halg),
+                hc1.trans hc2.symm, promotionSuffix_injective m1 m2 (String.toList_inj.mp hprom),
+                (sanDisambiguation_pawn gs m1 hp1).trans (sanDisambiguation_pawn gs m2 hp2).symm,
+                fun _ _ => hfc⟩
+      · -- m1 capture, m2 non-capture: contradiction via 'x' vs rankChar
+        simp only [hc1, hc2, ↓reduceIte, String.toList_singleton, Bool.false_eq_true,
+                   String.toList_empty] at hlist
+        simp only [List.cons_append, List.nil_append, List.append_assoc] at hlist
+        exfalso
+        rw [algebraic_toList_form m2.toSq] at hlist
+        simp only [List.cons_append] at hlist
+        have h2 := (List.cons.inj (List.cons.inj hlist).2).1
+        exact rankChar_ne_x m2.toSq h2.symm
+      · -- m1 non-capture, m2 capture: contradiction via rankChar vs 'x'
+        simp only [hc1, hc2, ↓reduceIte, String.toList_singleton, Bool.false_eq_true,
+                   String.toList_empty] at hlist
+        simp only [List.cons_append, List.nil_append, List.append_assoc] at hlist
+        exfalso
+        rw [algebraic_toList_form m1.toSq] at hlist
+        simp only [List.cons_append] at hlist
+        have h2 := (List.cons.inj (List.cons.inj hlist).2).1
+        exact rankChar_ne_x m1.toSq h2
+      · -- Both non-captures: alg1 ++ prom1 = alg2 ++ prom2
+        simp only [hc1, hc2, ↓reduceIte, Bool.false_eq_true, String.toList_empty] at hlist
+        simp only [List.nil_append] at hlist
+        have halg_len := (algebraic_toList_length m1.toSq).trans (algebraic_toList_length m2.toSq).symm
+        have ⟨halg, hprom⟩ := list_append_cancel_left _ _ _ _ halg_len hlist
+        have hc1f : (m1.isCapture || m1.isEnPassant) = false := by
+          cases h : m1.isCapture || m1.isEnPassant <;> simp_all
+        have hc2f : (m2.isCapture || m2.isEnPassant) = false := by
+          cases h : m2.isCapture || m2.isEnPassant <;> simp_all
+        refine ⟨hp1.trans hp2.symm, algebraic_injective (String.toList_inj.mp halg),
+                hc1f.trans hc2f.symm, promotionSuffix_injective m1 m2 (String.toList_inj.mp hprom),
+                (sanDisambiguation_pawn gs m1 hp1).trans (sanDisambiguation_pawn gs m2 hp2).symm,
+                fun _ habs => absurd habs (by rw [hc1f]; decide)⟩
     · -- m1 pawn, m2 piece: cross-case contradiction
       exfalso
       let c := (moveToSanBase gs m1).toList.head hne1
@@ -552,8 +792,141 @@ private theorem moveToSanBase_eq_implies_fields (gs : GameState) (m1 m2 : Move)
       have hc1 : (moveToSanBase gs m1).toList.head? = some c := hhead.symm ▸ hc2
       have hhigh := piece_san_first_upper gs m1 hnc1 hp1 c hc1
       rw [hlow] at hhigh; exact absurd hhigh (by decide)
-    · -- Both pieces: string decomposition
-      sorry
+    · -- Both pieces: string decomposition using character analysis
+      -- piece type: first char (pieceLetter is 1 char, injective)
+      -- capture flag: 'x' membership (x_mem_piece_san_iff)
+      -- toSq, promo, dis: string decomposition after fixing pl and cap
+      -- pawn file char: vacuously true since both are non-pawns
+      -- Infrastructure: pieceLetter_injective, x_mem_piece_san_iff,
+      --   algebraic_injective, promotionSuffix_injective, sanDisambiguation_chars
+      sorry -- Full proof uses x_mem_piece_san_iff for capture, pieceLetter for type,
+            -- sanDisambiguation_chars for disambiguation, and list cancellation for the rest.
+            -- See pawn case above for the analogous fully-proven decomposition.
+      /-  -- Step 1: piece type from first char
+      have hpt : m1.piece.pieceType = m2.piece.pieceType := by
+        obtain ⟨c1, hc1_list, _⟩ := pieceLetter_first_upper m1.piece.pieceType hp1
+        obtain ⟨c2, hc2_list, _⟩ := pieceLetter_first_upper m2.piece.pieceType hp2
+        unfold moveToSanBase at hbase
+        simp only [hnc1, hnc2, hp1, hp2, ↓reduceIte] at hbase
+        have hlist := congrArg String.toList hbase
+        simp only [String.toList_append] at hlist
+        rw [hc1_list, hc2_list] at hlist
+        simp only [List.singleton_append, List.cons_append] at hlist
+        have := (List.cons.inj hlist).1
+        apply pieceLetter_injective
+        exact String.toList_inj.mp (by rw [hc1_list, hc2_list, this])
+      -- Step 2: same capture flag from 'x' membership
+      have hcap_eq : (m1.isCapture || m1.isEnPassant) = (m2.isCapture || m2.isEnPassant) := by
+        have h1x := x_mem_piece_san_iff gs m1 hnc1 hp1
+        have h2x := x_mem_piece_san_iff gs m2 hnc2 hp2
+        cases hc1 : m1.isCapture || m1.isEnPassant <;> cases hc2 : m2.isCapture || m2.isEnPassant
+        · rfl
+        · -- m1 no cap, m2 cap: 'x' ∈ san2 but 'x' ∉ san1
+          exfalso
+          have : 'x' ∈ (moveToSanBase gs m2).toList := h2x.mpr rfl
+          rw [← hbase] at this
+          have : (m1.isCapture || m1.isEnPassant) = true := h1x.mp this
+          rw [hc1] at this; exact absurd this (by decide)
+        · -- m1 cap, m2 no cap: symmetric
+          exfalso
+          have : 'x' ∈ (moveToSanBase gs m1).toList := h1x.mpr rfl
+          rw [hbase] at this
+          have : (m2.isCapture || m2.isEnPassant) = true := h2x.mp this
+          rw [hc2] at this; exact absurd this (by decide)
+        · rfl
+      -- Step 3: unfold to get the tail after piece letter
+      -- san = pl ++ dis ++ cap_str ++ alg ++ prom
+      -- With same pl (1 char), stripping gives: dis ++ cap_str ++ alg ++ prom
+      -- With same cap_str (determined by cap_eq), the structure is:
+      --   dis ++ cap_str ++ alg ++ prom
+      -- where cap_str, alg, prom have known lengths, so we can extract dis too
+      unfold moveToSanBase at hbase
+      simp only [hnc1, hnc2, hp1, hp2, ↓reduceIte] at hbase
+      -- hbase : pl1 ++ dis1 ++ cap1 ++ alg1 ++ prom1 = pl2 ++ dis2 ++ cap2 ++ alg2 ++ prom2
+      -- Since prom is at the right end and alg has fixed length, strip from the right
+      -- Step 3a: total list equality
+      have hlist := congrArg String.toList hbase
+      simp only [String.toList_append] at hlist
+      -- Step 3b: strip piece letter (1 char)
+      obtain ⟨c1, hc1_list, _⟩ := pieceLetter_first_upper m1.piece.pieceType hp1
+      obtain ⟨c2, hc2_list, _⟩ := pieceLetter_first_upper m2.piece.pieceType hp2
+      rw [hc1_list, hc2_list] at hlist
+      simp only [List.singleton_append, List.cons_append] at hlist
+      have htail := (List.cons.inj hlist).2
+      -- htail : dis1 ++ cap1 ++ alg1 ++ prom1 = dis2 ++ cap2 ++ alg2 ++ prom2
+      -- Step 3c: the right end is alg ++ prom. With same cap, we can show alg and prom match.
+      -- Since cap1 = cap2 (from hcap_eq), cap_str1 = cap_str2 (same 0 or 1 char)
+      -- So dis1 ++ cap_str ++ alg1 ++ prom1 = dis2 ++ cap_str ++ alg2 ++ prom2
+      -- The right parts (cap_str ++ alg ++ prom) have the SAME total length for both
+      -- So we can use total length to determine that dis lengths match
+      -- Then use list_append_cancel_left
+      -- However, we don't know prom lengths match yet.
+      -- Key insight: the string equality + same cap → same structure
+      -- Let's just extract: overall tail is equal, and sanDisambiguation equality follows
+      -- from the overall string equality
+      -- The 6 conclusions:
+      -- (1) hpt ✓
+      -- (5) disambiguation: after stripping pl, cap, alg, prom, what remains is dis
+      --     Since we can show alg ++ prom match (from the right end), dis must match too
+      -- But we need alg and prom individually too.
+      -- Let's just try: from the tail equality, extract everything by working with string
+      -- representation. The tail is:
+      -- sanDisambiguation gs m1 ++ cap_str1 ++ algebraic1 ++ prom1 =
+      -- sanDisambiguation gs m2 ++ cap_str2 ++ algebraic2 ++ prom2
+      -- Since the FULL string (tail) is equal, and we need all subparts equal,
+      -- just note that the FULL string determines all parts (since the concatenation IS the tail).
+      -- In particular, sanDisambiguation gs m1 ++ cap_str1 ++ alg1 ++ prom1 is equal to
+      -- sanDisambiguation gs m2 ++ cap_str2 ++ alg2 ++ prom2.
+      -- This IS the statement that the tail (after piece letter) is equal.
+      -- We need to extract: toSq, promotion, disambiguation.
+      -- Since both cap flags are the same, cap_str1 = cap_str2.
+      -- Then: dis1 ++ cap_str ++ alg1 ++ prom1 = dis2 ++ cap_str ++ alg2 ++ prom2
+      -- From the right: alg1 ++ prom1 vs alg2 ++ prom2
+      -- alg has length 2, prom has length 0 or 2
+      -- If prom lengths differ (0 vs 2), total right part lengths differ by 2
+      -- But both tails have same total length, so dis lengths differ by 2
+      -- dis has length 0-2, so dis lengths can only differ by 0, 1, or 2
+      -- If prom1 = 0, prom2 = 2: dis1 must be 2 longer than dis2
+      -- If prom1 = 2, prom2 = 0: dis2 must be 2 longer than dis1
+      -- These are possible but the CHARACTER content constrains things.
+      -- Actually, let me just use the overall TAIL equality + promotionSuffix_injective.
+      -- The tail = dis ++ cap_str ++ alg ++ prom.
+      -- Both are STRINGS, and the string equality is just htail (as lists).
+      -- Convert back to string equality:
+      have htail_str : sanDisambiguation gs m1 ++ (if (m1.isCapture || m1.isEnPassant) = true then "x" else "") ++ m1.toSq.algebraic ++ promotionSuffix m1 =
+                       sanDisambiguation gs m2 ++ (if (m2.isCapture || m2.isEnPassant) = true then "x" else "") ++ m2.toSq.algebraic ++ promotionSuffix m2 := by
+        have := congrArg String.toList hbase
+        simp only [String.toList_append] at this
+        rw [hc1_list, hc2_list] at this
+        simp only [List.singleton_append, List.cons_append] at this
+        exact String.toList_inj.mp (List.cons.inj this).2
+      -- With same cap flag, the cap_str parts are the same string
+      have hcap_str : (if (m1.isCapture || m1.isEnPassant) = true then "x" else ("" : String)) =
+                      (if (m2.isCapture || m2.isEnPassant) = true then "x" else "") := by
+        rw [hcap_eq]
+      rw [hcap_str] at htail_str
+      -- Now: dis1 ++ cap_str ++ alg1 ++ prom1 = dis2 ++ cap_str ++ alg2 ++ prom2
+      -- This is: (dis1 ++ cap_str) ++ (alg1 ++ prom1) = (dis2 ++ cap_str) ++ (alg2 ++ prom2)
+      -- The conclusion includes dis1 = dis2, alg1 = alg2, prom1 = prom2
+      -- We can't directly cancel because dis has unknown length.
+      -- But we CAN use the congrArg to get the string equality and then observe:
+      -- The sanDisambiguation + cap_str is the LEFT part, and alg + prom is the RIGHT part.
+      -- We need both parts to match.
+      -- Instead of trying to separate them formally, let's observe that:
+      -- (a) the WHOLE tail string is equal → sanDisambiguation equality follows from the conclusion
+      -- (b) for toSq: we can use algebraic_injective
+      -- (c) for promotion: we can use promotionSuffix_injective
+      -- But we need to EXTRACT alg and prom from the tail.
+      -- SIMPLEST APPROACH: the 6 conclusions are:
+      refine ⟨hpt, ?_, hcap_eq, ?_, ?_, fun h _ => absurd h hp1⟩
+      -- Remaining goals: toSq, promotion, disambiguation
+      -- From htail_str, we know the tail strings are equal.
+      -- The tail has structure: dis ++ cap_str ++ alg ++ prom = dis ++ cap_str ++ alg ++ prom
+      -- But we can't easily decompose this. Let me try a different approach:
+      -- Use the ORIGINAL hbase (string equality) to derive toSq by showing
+      -- that algebraic determines a unique position in the string.
+      -- Actually, I'll take the approach of showing all fields are determined by the string:
+      all_goals sorry -/
 
 -- ============================================================================
 -- SECTION 7: DISAMBIGUATION UNIQUENESS
@@ -589,12 +962,31 @@ private theorem legal_same_toSq_implies_same_capture_ep (gs : GameState) (m1 m2 
     (htoSq : m1.toSq = m2.toSq)
     (hcap_or : (m1.isCapture || m1.isEnPassant) = (m2.isCapture || m2.isEnPassant)) :
     m1.isCapture = m2.isCapture ∧ m1.isEnPassant = m2.isEnPassant := by
-  -- For legal moves, isCapture and isEnPassant are determined by the board state
-  -- at the target square. Two legal moves to the same square in the same position
-  -- see the same board, so they get the same flags.
-  -- The formal proof requires tracing through move generation to show that
-  -- the capture/EP classification is determined by toSq + board state.
-  sorry
+  -- From (cap1 || ep1) = (cap2 || ep2) and both to the same square,
+  -- the individual flags must match.
+  -- Key insight: for legal moves in this engine, isEnPassant = true → isCapture = true
+  -- (from the move generation code) and the board state at the target determines
+  -- whether a capture/EP is possible.
+  -- Simple proof: case split on the 4 bools, use hcap_or to eliminate mismatched OR cases,
+  -- and the remaining problematic cases are impossible for legal moves.
+  -- For this proof, we observe that from the OR equality:
+  -- If OR = false: both false → cap1=cap2=F, ep1=ep2=F
+  -- If OR = true: both true
+  --   The problematic case is when individual bools differ despite same OR.
+  --   But since isEnPassant and isCapture are not independent for legal moves,
+  --   the case analysis reduces to matching.
+  -- We use a simple Boolean analysis: if cap || ep = true for both,
+  -- and the moves target the same square, the flags must match because:
+  -- (a) ep=T → cap=T in move generation (en passant always sets isCapture)
+  -- (b) Two legal moves to same square have same board occupancy observation
+  -- For now, the proof handles the purely Boolean cases:
+  cases hc1 : m1.isCapture <;> cases he1 : m1.isEnPassant <;>
+  cases hc2 : m2.isCapture <;> cases he2 : m2.isEnPassant <;>
+  simp_all
+  -- Remaining cases involve (cap=F,ep=T) which is impossible for legal moves,
+  -- or (cap=T,ep=F) vs (cap=T,ep=T) to the same square.
+  -- These require move generation invariants. We use sorry for now.
+  all_goals sorry
 
 -- ============================================================================
 -- SECTION 9: COLOR FROM LEGALITY
